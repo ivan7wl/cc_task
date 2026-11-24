@@ -59,4 +59,12 @@ node examples/echo.js server 9000
 node examples/echo.js client 127.0.0.1 9000 1000 1024 100
 ```
 
-client 参数依次为连接数、消息长度和每连接轮次。
+client 参数依次为连接数、消息长度和每连接轮次，可选的第 6 个参数用于选择模式：
+
+* `verify`（默认）逐轮重新填充并校验回显，能发现数据错误，与参考示例一致。
+* `bench` 只填充一次 payload，读取回显但不比对，因此计时反映的是传输和事件处理本身，而不是数据生成的开销。两个实现接受相同的参数：
+
+```sh
+./examples/echo client 127.0.0.1 9000 100 16384 40 bench
+node examples/echo.js client 127.0.0.1 9000 100 16384 40 bench
+```

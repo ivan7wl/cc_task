@@ -59,4 +59,12 @@ node examples/echo.js server 9000
 node examples/echo.js client 127.0.0.1 9000 1000 1024 100
 ```
 
-The client parameters are the connection count, message size, and rounds per connection, in that order.
+The client parameters are the connection count, message size, and rounds per connection, in that order. An optional sixth parameter selects the mode:
+
+* `verify` (default) refills and checks every echoed byte, so it catches corruption and reads like the reference example.
+* `bench` fills the payload once and reads the echo without comparing it, so a timing run measures transport and event handling instead of payload generation. Both implementations accept the same argument:
+
+```sh
+./examples/echo client 127.0.0.1 9000 100 16384 40 bench
+node examples/echo.js client 127.0.0.1 9000 100 16384 40 bench
+```

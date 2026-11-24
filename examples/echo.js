@@ -94,31 +94,40 @@ async function makeConnect(host, port) {
     return socket;
 }
 
-async function runConnection(host, port, messageSize, rounds) {
+async function runConnection(host, port, messageSize, rounds, verify) {
     const socket = await makeConnect(host, port);
     const readExactly = makeReader(socket);
     const payload = Buffer.allocUnsafe(messageSize);
+    let received = 0;
 
-    for (let round = 0; round < rounds; ++round) {
-        fillBuf(payload, round);
-        await makeWrite(socket, payload);
-        const echoed = await readExactly(messageSize);
-        if (!checkBuf(echoed, round)) {
-            throw new Error("echo data mismatch");
+    try {
+        fillBuf(payload, 0);
+        for (let round = 0; round < rounds; ++round) {
+            if (verify) {
+                fillBuf(payload, round);
+            }
+            await makeWrite(socket, payload);
+            const echoed = await readExactly(messageSize);
+            if (verify && !checkBuf(echoed, round)) {
+                throw new Error("echo data mismatch");
+            }
+            received += echoed.length; // bench mode still consumes the echo, it just does not compare it
         }
+    } finally {
+        socket.destroy(); // release the handle even when a check above fails
     }
 
-    const closed = once(socket, "close");
-    socket.end();
-    await closed;
-    return messageSize * rounds;
+    if (received !== messageSize * rounds) {
+        throw new Error("unexpected byte count");
+    }
+    return received;
 }
 
-async function runClient(host, port, connections, messageSize, rounds) {
+async function runClient(host, port, connections, messageSize, rounds, verify) {
     const started = performance.now();
     // Every function runs to its first await immediately: this is Promise.all in C.
     const jobs = Array.from({ length: connections }, () =>
-        runConnection(host, port, messageSize, rounds));
+        runConnection(host, port, messageSize, rounds, verify));
     const counts = await Promise.all(jobs);
     const seconds = (performance.now() - started) / 1000;
     const bytes = counts.reduce((sum, count) => sum + count, 0);
@@ -138,7 +147,11 @@ function parseNumber(text, min, max) {
 function usage() {
     console.error(`usage:
   node examples/echo.js server <port>
-  node examples/echo.js client <host> <port> <connections> <messageSize> <rounds>`);
+  node examples/echo.js client <host> <port> <connections> <messageSize> <rounds> [verify|bench]
+
+verify (default) refills and checks every echoed byte, as the example does.
+bench fills the payload once and only counts the echoed bytes, so a timing run
+does not also measure JavaScript byte loops.`);
 }
 
 async function main() {
@@ -147,11 +160,18 @@ async function main() {
         await runServer(parseNumber(args[1], 1, 65535));
         return;
     }
-    if (args.length === 6 && args[0] === "client") {
+    if ((args.length === 6 || args.length === 7) && args[0] === "client") {
+        const mode = args.length === 7 ? args[6] : "verify";
+        if (mode !== "verify" && mode !== "bench") {
+            usage();
+            process.exitCode = 2;
+            return;
+        }
         await runClient(args[1], parseNumber(args[2], 1, 65535),
                         parseNumber(args[3], 1, 1000000),
                         parseNumber(args[4], 1, 16384),
-                        parseNumber(args[5], 1, 1000000));
+                        parseNumber(args[5], 1, 1000000),
+                        mode === "verify");
         return;
     }
     usage();

@@ -460,7 +460,7 @@ static int check_buf(const unsigned char *buf, int len, int round)
     return 0;
 }
 
-static cc_task_t *run_connection(struct sockaddr_in addr, int len, int rounds)
+static cc_task_t *run_connection(struct sockaddr_in addr, int len, int rounds, int verify)
 {
     int fd = -1, off = 0, round = 0, err = 0;
     size_t alloc_size = (64 + (size_t)len + 63) & ~(size_t)63;
@@ -483,8 +483,10 @@ static cc_task_t *run_connection(struct sockaddr_in addr, int len, int rounds)
         }
         $(fd) = (int)ret - 1;
 
+        fill_buf(buf, len, 0);
         while (round < rounds) {
-            fill_buf(buf, len, round);
+            if (verify)
+                fill_buf(buf, len, round);
             CC_AWAIT(t, make_write(io_mem, fd, buf, (size_t)len), ret);
             if (ret == 0) {
                 $(err) = 1;
@@ -500,7 +502,7 @@ static cc_task_t *run_connection(struct sockaddr_in addr, int len, int rounds)
                 }
                 $(off) += (int)ret;
             }
-            if (check_buf(buf, len, round) < 0) {
+            if (verify && check_buf(buf, len, round) < 0) {
                 $(err) = 1;
                 goto out;
             }
@@ -566,7 +568,7 @@ static int run_server(int port)
     return 0;
 }
 
-static int run_client(const char *host, int port, int connections, int len, int rounds)
+static int run_client(const char *host, int port, int connections, int len, int rounds, int verify)
 {
     struct sockaddr_in addr;
     struct timespec started, ended;
@@ -589,7 +591,7 @@ static int run_client(const char *host, int port, int connections, int len, int 
     g_left = connections;
     clock_gettime(CLOCK_MONOTONIC, &started);
     for (i = 0; i < connections; ++i) {
-        cc_task_t *client = run_connection(addr, len, rounds);
+        cc_task_t *client = run_connection(addr, len, rounds, verify);
         if (client == NULL)
             die("cc_task_new");
         cc_task_resume(&client); // top-level start: run to the first CC_WAIT or end
@@ -624,12 +626,25 @@ static int parse_number(const char *text, int min, int max)
     return (int)value;
 }
 
+static int parse_mode(const char *text)
+{
+    if (strcmp(text, "verify") == 0)
+        return 1;
+    if (strcmp(text, "bench") == 0)
+        return 0;
+    return -1;
+}
+
 static void usage(const char *program)
 {
     fprintf(stderr,
             "usage:\n"
             "  %s server <port>\n"
-            "  %s client <host> <port> <connections> <messageSize> <rounds>\n",
+            "  %s client <host> <port> <connections> <messageSize> <rounds> [verify|bench]\n"
+            "\n"
+            "verify (default) refills and checks every echoed byte, as the example does.\n"
+            "bench fills the payload once and only counts the echoed bytes, so a timing\n"
+            "run does not also measure payload generation.\n",
             program, program);
 }
 
@@ -639,13 +654,14 @@ int main(int argc, char **argv)
         int port = parse_number(argv[2], 1, 65535);
         if (port >= 0)
             return run_server(port);
-    } else if (argc == 7 && strcmp(argv[1], "client") == 0) {
+    } else if ((argc == 7 || argc == 8) && strcmp(argv[1], "client") == 0) {
         int port = parse_number(argv[3], 1, 65535);
         int connections = parse_number(argv[4], 1, 1000000);
         int len = parse_number(argv[5], 1, MAX_MESSAGE_SIZE);
         int rounds = parse_number(argv[6], 1, 1000000);
-        if (port >= 0 && connections >= 0 && len >= 0 && rounds >= 0)
-            return run_client(argv[2], port, connections, len, rounds);
+        int verify = argc == 8 ? parse_mode(argv[7]) : 1;
+        if (port >= 0 && connections >= 0 && len >= 0 && rounds >= 0 && verify >= 0)
+            return run_client(argv[2], port, connections, len, rounds, verify);
     }
     usage(argv[0]);
     return 2;
