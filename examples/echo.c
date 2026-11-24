@@ -1,4 +1,4 @@
-// Linux epoll + stackless cc_task: one task per connection, no thread per connection.
+// epoll (Linux) or kqueue (macOS) + stackless cc_task: one task per connection, no thread per connection.
 // Compare this file with echo.js: arm(...) + CC_WAIT(t) is the C version of await.
 
 #define _GNU_SOURCE
@@ -7,23 +7,41 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/epoll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <sys/event.h>
+#include <sys/sysctl.h>
+#else
+#include <sys/epoll.h>
+#endif
+
 #define BUF_SIZE (16 * 1024 - 64) // 64B io_mem + data buf = 16 KiB per server connection
 #define MAX_MESSAGE_SIZE (16 * 1024)
 #define EV_BATCH 128
+#define LISTEN_BACKLOG 4096 // macOS clamps this to kern.ipc.somaxconn, 128 by default
 
-static int g_epfd = -1;
+// The only two wait directions this demo needs: each backend maps them to its own filters.
+#define IO_READ 1
+#define IO_WRITE 2
+
+#if defined(MSG_NOSIGNAL)
+#define SEND_FLAGS MSG_NOSIGNAL
+#else
+#define SEND_FLAGS 0 // macOS reports a dead peer through SO_NOSIGPIPE, see set_nopipe()
+#endif
+
+static int g_pfd = -1; // epoll or kqueue descriptor
 static int g_left, g_failed;
 static unsigned long long g_bytes;
 
@@ -33,14 +51,80 @@ static void die(const char *message)
     exit(EXIT_FAILURE);
 }
 
-static void arm(int fd, cc_task_t *t, uint32_t events)
+#if defined(__APPLE__)
+
+// --- kqueue backend -----------------------------------------------------------
+
+static int poll_open(void)
+{
+    int kq = kqueue();
+    if (kq >= 0 && fcntl(kq, F_SETFD, fcntl(kq, F_GETFD, 0) | FD_CLOEXEC) < 0) {
+        int error = errno;
+        close(kq);
+        errno = error;
+        return -1;
+    }
+    return kq;
+}
+
+static void arm(int fd, cc_task_t *t, int io)
+{
+    struct kevent change;
+
+    // level triggered like epoll: no EV_CLEAR, so a ready descriptor keeps firing
+    EV_SET(&change, (uintptr_t)fd, io == IO_WRITE ? EVFILT_WRITE : EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, t);
+    if (kevent(g_pfd, &change, 1, NULL, 0, NULL) < 0)
+        die("kevent add");
+    // kqueue keeps one filter per direction, so drop the other one; ENOENT means it was not armed
+    EV_SET(&change, (uintptr_t)fd, io == IO_WRITE ? EVFILT_READ : EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+    kevent(g_pfd, &change, 1, NULL, 0, NULL);
+}
+
+static void close_fd(int fd)
+{
+    if (fd >= 0)
+        close(fd); // kqueue drops the filters of a closed descriptor
+}
+
+static int poll_wait(cc_task_t **ready, int max, int timeout_ms)
+{
+    struct kevent events[EV_BATCH];
+    struct timespec timeout, *timeout_ptr = NULL;
+    int n, i;
+
+    if (max > EV_BATCH)
+        max = EV_BATCH;
+    if (timeout_ms >= 0) {
+        timeout.tv_sec = timeout_ms / 1000;
+        timeout.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
+        timeout_ptr = &timeout;
+    }
+    n = kevent(g_pfd, NULL, 0, events, max, timeout_ptr);
+    if (n < 0)
+        return -1;
+    for (i = 0; i < n; ++i)
+        ready[i] = (cc_task_t *)events[i].udata;
+    return n;
+}
+
+#else
+
+// --- epoll backend ------------------------------------------------------------
+
+static int poll_open(void)
+{
+    return epoll_create1(EPOLL_CLOEXEC);
+}
+
+static void arm(int fd, cc_task_t *t, int io)
 {
     struct epoll_event event;
+
     memset(&event, 0, sizeof(event));
-    event.events = events; // level triggered keeps this small demo easy to reason about
+    event.events = io == IO_WRITE ? EPOLLOUT : EPOLLIN; // level triggered keeps this small demo easy to reason about
     event.data.ptr = t;
-    if (epoll_ctl(g_epfd, EPOLL_CTL_MOD, fd, &event) < 0) {
-        if (errno != ENOENT || epoll_ctl(g_epfd, EPOLL_CTL_ADD, fd, &event) < 0)
+    if (epoll_ctl(g_pfd, EPOLL_CTL_MOD, fd, &event) < 0) {
+        if (errno != ENOENT || epoll_ctl(g_pfd, EPOLL_CTL_ADD, fd, &event) < 0)
             die("epoll_ctl");
     }
 }
@@ -48,15 +132,113 @@ static void arm(int fd, cc_task_t *t, uint32_t events)
 static void close_fd(int fd)
 {
     if (fd >= 0) {
-        epoll_ctl(g_epfd, EPOLL_CTL_DEL, fd, NULL);
+        epoll_ctl(g_pfd, EPOLL_CTL_DEL, fd, NULL);
         close(fd);
     }
+}
+
+static int poll_wait(cc_task_t **ready, int max, int timeout_ms)
+{
+    struct epoll_event events[EV_BATCH];
+    int n, i;
+
+    if (max > EV_BATCH)
+        max = EV_BATCH;
+    n = epoll_wait(g_pfd, events, max, timeout_ms);
+    if (n < 0)
+        return -1;
+    for (i = 0; i < n; ++i)
+        ready[i] = (cc_task_t *)events[i].data.ptr;
+    return n;
+}
+
+#endif
+
+// SOCK_NONBLOCK and SOCK_CLOEXEC only exist on Linux; macOS sets both with fcntl().
+static int set_nonblocking_cloexec(int fd)
+{
+#if defined(__APPLE__)
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+        return -1;
+    flags = fcntl(fd, F_GETFD, 0);
+    if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0)
+        return -1;
+#else
+    (void)fd;
+#endif
+    return 0;
+}
+
+static int create_socket(void)
+{
+#if defined(__APPLE__)
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+#else
+    int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+#endif
+
+    if (fd < 0)
+        return -1;
+    if (set_nonblocking_cloexec(fd) < 0) {
+        int error = errno;
+        close(fd);
+        errno = error;
+        return -1;
+    }
+    return fd;
+}
+
+static int accept_socket(int lfd)
+{
+#if defined(__APPLE__)
+    int fd = accept(lfd, NULL, NULL);
+
+    if (fd < 0)
+        return -1;
+    if (set_nonblocking_cloexec(fd) < 0) {
+        int error = errno;
+        close(fd);
+        errno = error;
+        return -1;
+    }
+    return fd;
+#else
+    return accept4(lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+#endif
 }
 
 static void set_nodelay(int fd)
 {
     int on = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
+}
+
+// MSG_NOSIGNAL does not exist on macOS; SO_NOSIGPIPE keeps send() from raising SIGPIPE instead.
+static void set_nopipe(int fd)
+{
+#if defined(SO_NOSIGPIPE)
+    int on = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
+#else
+    (void)fd;
+#endif
+}
+
+// macOS clamps the backlog to kern.ipc.somaxconn, so a larger client burst is reset
+// instead of queued. Say so once at startup rather than letting it look like a bug.
+static void report_backlog(void)
+{
+#if defined(__APPLE__)
+    int somaxconn = 0;
+    size_t size = sizeof(somaxconn);
+    if (sysctlbyname("kern.ipc.somaxconn", &somaxconn, &size, NULL, 0) == 0 &&
+        somaxconn < LISTEN_BACKLOG) {
+        fprintf(stderr, "note: kern.ipc.somaxconn is %d, so bursts above that are reset;"
+                        " raise it with: sudo sysctl -w kern.ipc.somaxconn=1024\n",
+                somaxconn);
+    }
+#endif
 }
 
 static void raise_nofile(void)
@@ -85,7 +267,7 @@ static cc_task_t *make_read(void *mem, int fd, void *buf, size_t len)
                 n = 0;
                 break;
             }
-            arm(fd, t, EPOLLIN);
+            arm(fd, t, IO_READ);
             CC_WAIT(t);
         }
         CC_END(t, n);
@@ -103,7 +285,7 @@ static cc_task_t *make_write(void *mem, int fd, const void *buf, size_t len)
     {
         CC_BEGIN(t);
         while (off < len) {
-            cc_intptr n = (cc_intptr)send(fd, (const unsigned char *)buf + off, len - off, MSG_NOSIGNAL);
+            cc_intptr n = (cc_intptr)send(fd, (const unsigned char *)buf + off, len - off, SEND_FLAGS);
             if (n > 0) {
                 $(off) += (cc_size)n;
                 continue;
@@ -111,7 +293,7 @@ static cc_task_t *make_write(void *mem, int fd, const void *buf, size_t len)
             if (n < 0 && errno == EINTR)
                 continue;
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                arm(fd, t, EPOLLOUT);
+                arm(fd, t, IO_WRITE);
                 CC_WAIT(t);
                 continue;
             }
@@ -133,6 +315,7 @@ static cc_task_t *serve_connection(int fd)
     if (io_mem == NULL)
         return NULL;
     set_nodelay(fd);
+    set_nopipe(fd);
 
     task = cc_task_new(CC_TASK(t)
     {
@@ -156,7 +339,7 @@ static cc_task_t *serve_connection(int fd)
     });
 
     if (task != NULL) {
-        arm(fd, task, EPOLLIN); // the first event also starts the task
+        arm(fd, task, IO_READ); // the first event also starts the task
     } else {
         free(io_mem);
     }
@@ -165,7 +348,7 @@ static cc_task_t *serve_connection(int fd)
 
 static int listen_on(int port)
 {
-    int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    int fd = create_socket();
     int on = 1;
     struct sockaddr_in addr;
 
@@ -176,7 +359,7 @@ static int listen_on(int port)
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons((uint16_t)port);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(fd, 4096) < 0) {
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(fd, LISTEN_BACKLOG) < 0) {
         int error = errno;
         close(fd);
         errno = error;
@@ -197,16 +380,16 @@ static cc_task_t *make_listener(int port)
     {
         CC_BEGIN(t);
         for (;;) {
-            int fd = accept4(lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+            int fd = accept_socket(lfd);
             if (fd < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                arm(lfd, t, EPOLLIN);
+                arm(lfd, t, IO_READ);
                 CC_WAIT(t); // await the next connection
                 continue;
             }
             if (fd < 0 && (errno == EINTR || errno == ECONNABORTED))
                 continue;
             if (fd < 0)
-                die("accept4");
+                die("accept");
 
             if (serve_connection(fd) == NULL)
                 close(fd); // allocation failure only rejects this connection
@@ -215,7 +398,7 @@ static cc_task_t *make_listener(int port)
     });
 
     if (task != NULL)
-        arm(lfd, task, EPOLLIN); // first connection starts the listener task
+        arm(lfd, task, IO_READ); // first connection starts the listener task
     return task;
 }
 
@@ -234,10 +417,11 @@ static cc_task_t *make_connect(void *mem, struct sockaddr_in addr)
         int n;
 
         CC_BEGIN(t);
-        $(fd) = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        $(fd) = create_socket();
         if (fd < 0)
             CC_EXIT(t, 0);
         set_nodelay(fd);
+        set_nopipe(fd);
 
         n = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
         if (n < 0 && errno != EINPROGRESS && errno != EINTR) {
@@ -245,7 +429,7 @@ static cc_task_t *make_connect(void *mem, struct sockaddr_in addr)
             CC_EXIT(t, 0);
         }
         if (n < 0) {
-            arm(fd, t, EPOLLOUT);
+            arm(fd, t, IO_WRITE);
             CC_WAIT(t);
             if (socket_error(fd) != 0) {
                 close_fd(fd);
@@ -343,14 +527,14 @@ static cc_task_t *run_connection(struct sockaddr_in addr, int len, int rounds)
 // remaining == NULL means a server; otherwise stop when all clients have ended.
 static int run_events(int timeout_ms, const int *remaining)
 {
-    struct epoll_event events[EV_BATCH];
+    cc_task_t *ready[EV_BATCH];
 
     for (;;) {
         int n, i;
         if (remaining != NULL && *remaining == 0)
             return 0;
 
-        n = epoll_wait(g_epfd, events, EV_BATCH, timeout_ms);
+        n = poll_wait(ready, EV_BATCH, timeout_ms);
         if (n < 0 && errno == EINTR)
             continue;
         if (n < 0)
@@ -360,7 +544,7 @@ static int run_events(int timeout_ms, const int *remaining)
             return -1;
         }
         for (i = 0; i < n; ++i) {
-            cc_task_t *t = (cc_task_t *)events[i].data.ptr;
+            cc_task_t *t = ready[i];
             cc_task_resume(&t);
         }
     }
@@ -369,15 +553,16 @@ static int run_events(int timeout_ms, const int *remaining)
 static int run_server(int port)
 {
     raise_nofile();
-    g_epfd = epoll_create1(EPOLL_CLOEXEC);
-    if (g_epfd < 0)
-        die("epoll_create1");
+    report_backlog();
+    g_pfd = poll_open();
+    if (g_pfd < 0)
+        die("poll_open");
     if (make_listener(port) == NULL)
         die("cc_task_new");
     printf("listening 0.0.0.0:%d\n", port);
     fflush(stdout);
     if (run_events(-1, NULL) < 0)
-        die("epoll_wait");
+        die("poll_wait");
     return 0;
 }
 
@@ -397,9 +582,9 @@ static int run_client(const char *host, int port, int connections, int len, int 
     }
 
     raise_nofile();
-    g_epfd = epoll_create1(EPOLL_CLOEXEC);
-    if (g_epfd < 0)
-        die("epoll_create1");
+    g_pfd = poll_open();
+    if (g_pfd < 0)
+        die("poll_open");
 
     g_left = connections;
     clock_gettime(CLOCK_MONOTONIC, &started);
@@ -423,8 +608,8 @@ static int run_client(const char *host, int port, int connections, int len, int 
     printf("connections=%d failed=%d echoed=%llu bytes time=%.3fs rate=%.1f MiB/s\n", connections,
            g_failed, g_bytes, seconds, (double)g_bytes / seconds / (1024.0 * 1024.0));
 
-    close(g_epfd);
-    g_epfd = -1;
+    close(g_pfd);
+    g_pfd = -1;
     return g_failed == 0 ? 0 : 1;
 }
 
