@@ -1,0 +1,2 @@
+# every text file is LF, no matter which platform checks it out
+* text=auto eol=lf

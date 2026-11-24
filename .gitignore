@@ -1,0 +1,12 @@
+# build output
+out_dir/
+
+# macOS
+.DS_Store
+
+# editor / toolchain leftovers
+*.o
+*.d
+*.dSYM/
+*.swp
+.log/

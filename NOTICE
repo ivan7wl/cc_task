@@ -1,0 +1,8 @@
+cc_task
+Copyright 2026 cc_task contributors
+Project URL: <PROJECT_URL>
+
+cc_task is a featherweight C coroutine library with async/await-style
+task control, closure support, and stackless or stackful execution.
+
+Licensed under the Apache License, Version 2.0.
