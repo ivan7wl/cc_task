@@ -4,7 +4,7 @@
 
 这个 demo 实现 TCP echo server/client：server 原样发送收到的数据，client 并发建立连接，反复发送指定长度的消息并校验回显，最后输出字节数、耗时和吞吐。
 
-`echo.js` 是 JavaScript 参考实现，`echo.c` 使用 `cc_task + epoll（Linux）/ kqueue（macOS）` 实现相同的 server/client。两者都是单线程多并发模型，每个连接由独立的异步任务推进，等待 IO 时让出执行权，因此可以同时进行大量连接。
+`echo.js` 是 JavaScript 参考实现，`echo.c` 使用 `cc_task + epoll（Linux）/ kqueue（macOS）` 实现相同的 server/client。`echo.cpp` 是无第三方依赖的标准 C++20 coroutine 版本，直接使用相同的 `epoll` / `kqueue` 后端。三者都是单线程多并发模型，每个连接由独立的异步任务推进，等待 IO 时让出执行权，因此可以同时进行大量连接。
 
 ## 设计
 
@@ -13,6 +13,7 @@
 - read 处理一次非阻塞读取，write 处理完整写入、部分写和背压；client 通过偏移循环读满一条消息。
 - 每个 C 连接只做一次对齐分配：前 64B 是 `io_mem`，后面是数据 buffer。connect/read/write 通过 `cc_task_init()` 复用 `io_mem`，父连接结束时统一释放。
 - C 使用非阻塞 socket 和 level-triggered `epoll` / `kqueue`，重点展示并发异步代码的结构，而不是极限性能。
+- C++ 版的 `Task<T>` 是 lazy child task，`co_await` 会启动它并在完成时恢复父任务；listener 和每个连接则是 eager `DetachedTask`。`Socket` 通过 RAII 清理 fd 与事件注册。
 
 ## 代码对应
 
@@ -40,10 +41,18 @@ make -C examples
 ./examples/echo server 9000
 ```
 
-运行 client：
+C++20 coroutine 版需要支持 C++20 的 clang++，不依赖 `cc_task` 或第三方网络库。默认目标会同时构建两个原生版本，也可以只构建并运行 C++ 版：
+
+```sh
+make -C examples echo_cpp
+./examples/echo_cpp server 9000
+```
+
+运行 client（两个原生版本的命令行参数相同）：
 
 ```sh
 ./examples/echo client 127.0.0.1 9000 1000 1024 100
+./examples/echo_cpp client 127.0.0.1 9000 1000 1024 100
 ```
 
 macOS 的监听队列长度受 `kern.ipc.somaxconn` 限制（默认 128），同时建立超过该值的连接会被重置而不是排队。server 启动时会打印提示；需要更大并发可以先调高：
@@ -62,9 +71,10 @@ node examples/echo.js client 127.0.0.1 9000 1000 1024 100
 client 参数依次为连接数、消息长度和每连接轮次，可选的第 6 个参数用于选择模式：
 
 * `verify`（默认）逐轮重新填充并校验回显，能发现数据错误，与参考示例一致。
-* `bench` 只填充一次 payload，读取回显但不比对，因此计时反映的是传输和事件处理本身，而不是数据生成的开销。两个实现接受相同的参数：
+* `bench` 只填充一次 payload，读取回显但不比对，因此计时反映的是传输和事件处理本身，而不是数据生成的开销。各实现接受相同的参数：
 
 ```sh
 ./examples/echo client 127.0.0.1 9000 100 16384 40 bench
+./examples/echo_cpp client 127.0.0.1 9000 100 16384 40 bench
 node examples/echo.js client 127.0.0.1 9000 100 16384 40 bench
 ```

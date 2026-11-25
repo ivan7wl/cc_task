@@ -65,7 +65,7 @@ A: B end, code = 12
 
 ## TCP echo server / client
 
-见 `examples/` 子目录中的 `echo.c`，是用 cc_task 实现的单线程多并发 TCP echo server / client，Linux 上由 `epoll` 驱动、macOS 上由 `kqueue` 驱动（`make -C examples`，然后 `./examples/echo server 9000`）。`echo.js` 是对应的使用 async/await 实现的 JavaScript 版本。
+见 `examples/` 子目录中的 `echo.c`，是用 cc_task 实现的单线程多并发 TCP echo server / client，Linux 上由 `epoll` 驱动、macOS 上由 `kqueue` 驱动（`make -C examples`，然后 `./examples/echo server 9000`）。`echo.cpp` 是标准 C++20 coroutine 版本（构建为 `echo_cpp`），`echo.js` 是对应的使用 async/await 实现的 JavaScript 版本。
 
 # 特点
 

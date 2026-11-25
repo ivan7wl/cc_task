@@ -4,7 +4,7 @@
 
 This demo implements a TCP echo server and client. The server echoes every received byte unchanged, while clients establish connections concurrently, repeatedly send messages of a specified size, validate the echoed data, and report the byte count, elapsed time, and throughput.
 
-`echo.js` is the JavaScript reference implementation. `echo.c` implements the same server and client using `cc_task + epoll (Linux) or kqueue (macOS)`. Both use a single-threaded, highly concurrent model: an independent asynchronous task drives each connection and yields while waiting for IO, allowing one thread to handle many connections at once.
+`echo.js` is the JavaScript reference implementation. `echo.c` implements the same server and client using `cc_task + epoll (Linux) or kqueue (macOS)`. `echo.cpp` is the standard C++20 coroutine version, using the same backends directly with no third-party dependencies. All three use a single-threaded, highly concurrent model: an independent asynchronous task drives each connection and yields while waiting for IO, allowing one thread to handle many connections at once.
 
 ## Design
 
@@ -13,6 +13,7 @@ This demo implements a TCP echo server and client. The server echoes every recei
 - read performs one non-blocking read. write handles complete writes, partial writes, and backpressure. The client loops with an offset until it has read a full message.
 - Each C connection uses one aligned allocation: the first 64 bytes hold `io_mem`, followed by the data buffer. connect/read/write reuse `io_mem` through `cc_task_init()`, and the parent connection releases the allocation when it ends.
 - The C implementation uses non-blocking sockets and level-triggered `epoll` / `kqueue`, focusing on clear concurrent asynchronous code rather than peak performance.
+- In the C++ version, `Task<T>` is a lazy child task: `co_await` starts it and resumes its parent on completion. The listener and each connection are eager `DetachedTask`s. `Socket` uses RAII to close descriptors and remove event registrations.
 
 ## Code Mapping
 
@@ -40,10 +41,18 @@ make -C examples
 ./examples/echo server 9000
 ```
 
-Run the client in another terminal:
+The C++20 coroutine version requires a C++20-capable clang++ and has no dependency on `cc_task` or a third-party networking library. The default target builds both native versions; to build and run only the C++ version:
+
+```sh
+make -C examples echo_cpp
+./examples/echo_cpp server 9000
+```
+
+Run the client in another terminal (both native versions accept the same arguments):
 
 ```sh
 ./examples/echo client 127.0.0.1 9000 1000 1024 100
+./examples/echo_cpp client 127.0.0.1 9000 1000 1024 100
 ```
 
 On macOS the listen backlog is capped by `kern.ipc.somaxconn`, 128 by default, so a larger burst of simultaneous connections is reset instead of queued. The server prints a note at startup; raise the limit if you want deeper bursts:
@@ -62,9 +71,10 @@ node examples/echo.js client 127.0.0.1 9000 1000 1024 100
 The client parameters are the connection count, message size, and rounds per connection, in that order. An optional sixth parameter selects the mode:
 
 * `verify` (default) refills and checks every echoed byte, so it catches corruption and reads like the reference example.
-* `bench` fills the payload once and reads the echo without comparing it, so a timing run measures transport and event handling instead of payload generation. Both implementations accept the same argument:
+* `bench` fills the payload once and reads the echo without comparing it, so a timing run measures transport and event handling instead of payload generation. All implementations accept the same argument:
 
 ```sh
 ./examples/echo client 127.0.0.1 9000 100 16384 40 bench
+./examples/echo_cpp client 127.0.0.1 9000 100 16384 40 bench
 node examples/echo.js client 127.0.0.1 9000 100 16384 40 bench
 ```

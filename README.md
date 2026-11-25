@@ -65,7 +65,7 @@ In this example, coroutine B captures variable `c` by copying its current value 
 
 ## TCP echo server / client
 
-See `echo.c` in the `examples/` subdirectory for a single-threaded, highly concurrent TCP echo server/client implemented with cc_task, driven by `epoll` on Linux or `kqueue` on macOS (`make -C examples`, then `./examples/echo server 9000`). `echo.js` is the corresponding JavaScript implementation using async/await.
+See `echo.c` in the `examples/` subdirectory for a single-threaded, highly concurrent TCP echo server/client implemented with cc_task, driven by `epoll` on Linux or `kqueue` on macOS (`make -C examples`, then `./examples/echo server 9000`). `echo.cpp` is the standard C++20 coroutine variant (built as `echo_cpp`), and `echo.js` is the corresponding JavaScript implementation using async/await.
 
 # Features
 
