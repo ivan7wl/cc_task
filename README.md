@@ -67,6 +67,20 @@ In this example, coroutine B captures variable `c` by copying its current value 
 
 See `echo.c` in the `examples/` subdirectory for a single-threaded, highly concurrent TCP echo server/client implemented with cc_task, driven by `epoll` on Linux or `kqueue` on macOS (`make -C examples`, then `./examples/echo server 9000`). `echo.cpp` is the standard C++20 coroutine variant (built as `echo_cpp`), and `echo.js` is the corresponding JavaScript implementation using async/await.
 
+### C and C++ resource comparison
+
+Measured on Linux x86-64 with Clang 16 at `-O2`, using `bench` mode.
+
+| Metric | C server | C++ server | C client | C++ client | C++ / C (server / client) |
+|---|---:|---:|---:|---:|---:|
+| Idle RSS | 960 KiB | 1,880 KiB | 960 KiB | 1,880 KiB | 1.96x / 1.96x |
+| Added RSS per connection, 64 B | 4.68 KiB | 5.25 KiB | 0.67 KiB | 1.29 KiB | 1.12x / 1.93x |
+| Added RSS per connection, 16 KiB | 16.49 KiB | 17.11 KiB | 16.59 KiB | 17.12 KiB | 1.04x / 1.03x |
+| Total RSS at 1024 connections, 64 B | 5.62 MiB | 7.09 MiB | 1.61 MiB | 3.13 MiB | 1.26x / 1.94x |
+| Total RSS at 1024 connections, 16 KiB | 17.43 MiB | 18.95 MiB | 17.53 MiB | 18.96 MiB | 1.09x / 1.08x |
+| User-mode instructions per 64 B message | 401 | 593 | 439 | 979 | 1.48x / 2.23x |
+| User-mode instructions per 16 KiB message | 721 | 778 | 518 | 1,166 | 1.08x / 2.25x |
+
 # Features
 
 * Supports both stackless and stackful coroutines.

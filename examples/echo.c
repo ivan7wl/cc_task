@@ -1,7 +1,9 @@
 // epoll (Linux) or kqueue (macOS) + stackless cc_task: one task per connection, no thread per connection.
 // Compare this file with echo.js: arm(...) + CC_WAIT(t) is the C version of await.
 
+#if !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
+#endif
 
 #include "cc_task.h"
 

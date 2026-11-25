@@ -1,7 +1,9 @@
 // C++20 coroutines + epoll (Linux) or kqueue (macOS): one task per connection.
 // This is the standard coroutine counterpart of echo.c, with no external dependencies.
 
+#if !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
+#endif
 
 #include <arpa/inet.h>
 #include <array>
@@ -14,6 +16,7 @@
 #include <cstring>
 #include <exception>
 #include <fcntl.h>
+#include <memory>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <optional>
@@ -22,7 +25,6 @@
 #include <sys/types.h>
 #include <unordered_map>
 #include <utility>
-#include <vector>
 
 #if defined(__APPLE__)
 #include <sys/event.h>
@@ -548,7 +550,7 @@ DetachedTask serve_connection(EventLoop &loop, Socket socket)
 {
     set_nodelay(socket.get());
     set_nopipe(socket.get());
-    std::array<unsigned char, kBufferSize> buffer{};
+    std::array<unsigned char, kBufferSize> buffer;
 
     for (;;) {
         ssize_t count = co_await make_read(loop, socket.get(), buffer.data(), buffer.size());
@@ -621,24 +623,25 @@ DetachedTask run_connection(EventLoop &loop, struct sockaddr_in addr, int size, 
         if (!socket)
             co_return;
 
-        std::vector<unsigned char> buffer(static_cast<std::size_t>(size));
-        fill_buf(buffer.data(), size, 0);
+        const auto buffer_size = static_cast<std::size_t>(size);
+        std::unique_ptr<unsigned char[]> buffer(new unsigned char[buffer_size]);
+        fill_buf(buffer.get(), size, 0);
         for (int round = 0; round < rounds; ++round) {
             if (verify)
-                fill_buf(buffer.data(), size, round);
-            bool written = co_await make_write(loop, socket.get(), buffer.data(), buffer.size());
+                fill_buf(buffer.get(), size, round);
+            bool written = co_await make_write(loop, socket.get(), buffer.get(), buffer_size);
             if (!written)
                 co_return;
 
             int offset = 0;
             while (offset < size) {
-                ssize_t count = co_await make_read(loop, socket.get(), buffer.data() + offset,
+                ssize_t count = co_await make_read(loop, socket.get(), buffer.get() + offset,
                                                    static_cast<std::size_t>(size - offset));
                 if (count <= 0)
                     co_return;
                 offset += static_cast<int>(count);
             }
-            if (verify && !check_buf(buffer.data(), size, round))
+            if (verify && !check_buf(buffer.get(), size, round))
                 co_return;
         }
 

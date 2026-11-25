@@ -67,6 +67,20 @@ A: B end, code = 12
 
 见 `examples/` 子目录中的 `echo.c`，是用 cc_task 实现的单线程多并发 TCP echo server / client，Linux 上由 `epoll` 驱动、macOS 上由 `kqueue` 驱动（`make -C examples`，然后 `./examples/echo server 9000`）。`echo.cpp` 是标准 C++20 coroutine 版本（构建为 `echo_cpp`），`echo.js` 是对应的使用 async/await 实现的 JavaScript 版本。
 
+### C 与 C++ 资源占用对比
+
+以下为 Linux x86-64、Clang 16、`-O2` 下使用 `bench` 模式测得的对比。
+
+| 指标 | C 服务端 | C++ 服务端 | C 客户端 | C++ 客户端 | C++ / C（服务端 / 客户端） |
+|---|---:|---:|---:|---:|---:|
+| 空闲 RSS | 960 KiB | 1,880 KiB | 960 KiB | 1,880 KiB | 1.96x / 1.96x |
+| 64 B 每连接新增 RSS | 4.68 KiB | 5.25 KiB | 0.67 KiB | 1.29 KiB | 1.12x / 1.93x |
+| 16 KiB 每连接新增 RSS | 16.49 KiB | 17.11 KiB | 16.59 KiB | 17.12 KiB | 1.04x / 1.03x |
+| 64 B、1024 连接总 RSS | 5.62 MiB | 7.09 MiB | 1.61 MiB | 3.13 MiB | 1.26x / 1.94x |
+| 16 KiB、1024 连接总 RSS | 17.43 MiB | 18.95 MiB | 17.53 MiB | 18.96 MiB | 1.09x / 1.08x |
+| 每 64 B 消息用户态指令数 | 401 | 593 | 439 | 979 | 1.48x / 2.23x |
+| 每 16 KiB 消息用户态指令数 | 721 | 778 | 518 | 1,166 | 1.08x / 2.25x |
+
 # 特点
 
 * 支持无栈协程和有栈协程
