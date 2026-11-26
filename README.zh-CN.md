@@ -227,7 +227,7 @@ typedef struct _cc_task_t
     cc_u16     ctx_size;        // allocated ctx capacity in bytes
     cc_u32     flags;           // cc_tf_e
     void     (*fn)(void);       // block invoke slot, never called directly
-    void       *_desc;          // unused, preserves the block descriptor slot
+    void       *ext;            // extension context, preserves the block descriptor slot
     cc_u8      ctx[];           // user/captured ctx storage
 } cc_task_t;
 ```
@@ -238,7 +238,8 @@ typedef struct _cc_task_t
 | `lc` | 恢复点。`0` 是入口，`CC_LC_DONE`（`0xFFFF`）表示已结束，`CC_LC_ABORT`（`0xFFFE`）表示已请求 abort |
 | `ctx_size` | `ctx` 大小，单位字节，最大 65535。捕获变量或传统任务中指定的 `ctx` 上下文大小。 |
 | `flags` | `cc_tf_abort`：已请求 abort。`cc_tf_retain`：调用方提供的内存，结束时不释放 |
-| `fn`、`_desc` | 占住 block 的 invoke 和 descriptor 槽，调用方不要使用 |
+| `fn` | 保留给 block 的 invoke 槽，调用方不要直接写入 |
+| `ext` | 通用扩展上下文；没有库扩展占用时为 NULL |
 | `ctx` | 柔性数组，实际大小为 `ctx_size`。是捕获变量或传统任务的上下文。传统任务中可以用 `CC_CTX(t, type)` 访问 |
 
 ### `cc_lc_t`

@@ -35,7 +35,7 @@ static cc_task_t *probe_new(cc_probe_fn blk)
     t->ctx_size = (cc_u16)n;
     t->flags    = cc_tf_none;
     t->fn       = src->invoke;   // same slot as the block invoke
-    t->_desc    = NULL;
+    t->ext      = NULL;
 
     for (cc_size i = 0; i < n; i++)
     {

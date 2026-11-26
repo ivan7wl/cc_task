@@ -206,7 +206,7 @@ static void _cc_tstack_task_init(cc_task_t *t, CC_NULLABLE const void *ctx, cc_s
     t->ctx_size = (cc_u16)(ctx_size + pad);
     t->flags    = flags;
     t->fn       = (void (*)(void))_cc_tstack_wrapper;
-    t->_desc    = CC_NULL;
+    t->ext      = CC_NULL;
     CC_LC_INIT(t->lc);
 
     _cc_tstack_ctx_fill(t, ctx, ctx_size);

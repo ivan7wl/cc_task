@@ -17,7 +17,7 @@ static cc_task_t *_cc_tconv_init(cc_task_t *t, cc_tconv_func func, CC_NULLABLE c
     t->ctx_size = (cc_u16)n;
     t->flags    = flags;
     t->fn       = (void (*)(void))func;  // the invoke slot, read by the block call
-    t->_desc    = CC_NULL;
+    t->ext      = CC_NULL;
     CC_LC_INIT(t->lc);
 
     if (n != 0)

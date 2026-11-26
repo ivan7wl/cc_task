@@ -126,7 +126,7 @@ typedef struct _cc_task_t
     cc_u16     ctx_size;        // allocated ctx capacity in bytes
     cc_u32     flags;           // cc_tf_e, fixed width independent of enum ABI
     void     (*fn)(void);       // block invoke slot, never called directly
-    void       *_desc;          // unused, preserves the block descriptor slot
+    void       *ext;            // extension context, preserves the block descriptor slot
     cc_u8      ctx[];           // user/captured ctx storage, allocated ctx_size bytes
 } cc_task_t;
 

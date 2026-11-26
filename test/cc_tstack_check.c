@@ -45,7 +45,7 @@ static cc_task_t *plain_new(cc_tconv_func func, CC_NULLABLE const void *ctx, cc_
     t->ctx_size = (cc_u16)ctx_size;
     t->flags    = cc_tf_none;
     t->fn       = (void (*)(void))func;
-    t->_desc    = CC_NULL;
+    t->ext      = CC_NULL;
     CC_LC_INIT(t->lc);
     if (ctx_size != 0)
     {

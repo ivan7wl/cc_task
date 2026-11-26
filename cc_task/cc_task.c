@@ -33,7 +33,7 @@ static cc_task_t *_cc_task_init(cc_task_t *t, cc_size n, cc_task_func blk, cc_tf
 
     cc_blk_t *src = (cc_blk_t *)(void *)blk;
     t->fn    = src->invoke; // the invoke slot, read by the block call
-    t->_desc = CC_NULL;
+    t->ext   = CC_NULL;
     CC_LC_INIT(t->lc);
 
     if (n != 0) // verbatim, padding included, keeps the capture offsets

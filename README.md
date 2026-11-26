@@ -222,7 +222,7 @@ typedef struct _cc_task_t
     cc_u16     ctx_size;        // allocated ctx capacity in bytes
     cc_u32     flags;           // cc_tf_e
     void     (*fn)(void);       // block invoke slot, never called directly
-    void       *_desc;          // unused, preserves the block descriptor slot
+    void       *ext;            // extension context, preserves the block descriptor slot
     cc_u8      ctx[];           // user/captured ctx storage
 } cc_task_t;
 ```
@@ -233,7 +233,8 @@ typedef struct _cc_task_t
 | `lc` | Resume point. `0` is the entry, `CC_LC_DONE` (`0xFFFF`) means ended, and `CC_LC_ABORT` (`0xFFFE`) means abort requested. |
 | `ctx_size` | Size of `ctx` in bytes, up to 65535: captured-variable storage or a conventional task's explicit context size. |
 | `flags` | `cc_tf_abort`: abort requested. `cc_tf_retain`: caller-provided memory, not freed on completion. |
-| `fn`, `_desc` | Reserve the block invoke and descriptor slots; callers must not use them. |
+| `fn` | Reserved for the block invoke slot; callers must not write it directly. |
+| `ext` | Generic extension context; NULL unless a library extension owns it. |
 | `ctx` | Flexible array of `ctx_size` bytes holding captures or conventional-task context. Use `CC_CTX(t, type)` for conventional tasks. |
 
 ### `cc_lc_t`
