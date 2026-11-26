@@ -729,6 +729,35 @@ static void test_init(void)
     CHECK(cc_task_init(s_mem, need - 1, blk) == NULL);
 }
 
+static int s_runner_step;
+
+static void test_runner_block(void)
+{
+    s_runner_step = 0;
+    cc_task_t *a = cc_task_new(CC_TASK(t)
+    {
+        CC_BEGIN(t);
+        s_runner_step = s_runner_step * 10 + 1;
+        CC_YIELD(t);
+        s_runner_step = s_runner_step * 10 + 3;
+        CC_END(t, 0x31);
+    });
+    cc_task_t *b = cc_task_new(CC_TASK(t)
+    {
+        CC_BEGIN(t);
+        s_runner_step = s_runner_step * 10 + 2;
+        CC_END(t, 0x32);
+    });
+    cc_task_t *runner = cc_runner_new(a, b);
+    CHECK(runner != NULL);
+    cc_task_t *cur = runner;
+    CHECK(cc_task_resume(&cur) == cc_tr_yield && cur == runner);
+    CHECK(cc_task_resume(&cur) == cc_tr_yield && cur == runner);
+    CHECK(cc_task_resume(&cur) == cc_tr_end && cur == NULL);
+    CHECK(s_runner_step == 123);
+    CHECK(cc_task_ret() == 0x31);
+}
+
 //--------------------------------------------------------------------------------------------------------
 
 int main(void)
@@ -752,6 +781,7 @@ int main(void)
     test_resume();
     test_until();
     test_init();
+    test_runner_block();
 
     printf("cc_task: %s (%d failure(s))\n", s_fail ? "FAILED" : "all checks passed", s_fail);
 

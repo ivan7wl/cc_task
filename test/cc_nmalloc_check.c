@@ -162,6 +162,43 @@ static void test_stack_block_init(void)
 #endif // CC_CFG_TASK_BLOCK
 #endif // CC_CFG_TASK_STACKFUL
 
+#if CC_CFG_TASK_CONV
+static cc_tr_e nm_runner_body(cc_task_t *t, void *_, void *ctx)
+{
+    nm_ctx *c = (nm_ctx *)ctx;
+    CC_BEGIN(t);
+    CC_UNUSED(_);
+    c->value++;
+    CC_YIELD(t);
+    c->value++;
+    CC_END(t);
+}
+
+static void test_runner_init(void)
+{
+    static CC_ALIGN(16) cc_u8 ma[CC_TASK_SIZE(sizeof(nm_ctx))];
+    static CC_ALIGN(16) cc_u8 mb[CC_TASK_SIZE(sizeof(nm_ctx))];
+    static CC_ALIGN(16) cc_u8 storage[2048];
+    nm_ctx ca = { 0 }, cb = { 10 };
+    cc_task_t *a = cc_tconv_init(ma, sizeof(ma), nm_runner_body, &ca, sizeof(ca));
+    cc_task_t *b = cc_tconv_init(mb, sizeof(mb), nm_runner_body, &cb, sizeof(cb));
+    cc_size size = cc_runner_size_n(2);
+    CHECK(size != 0 && size <= sizeof(storage));
+    cc_task_t *runner = cc_runner_init_n(storage, size, 2, a, b);
+    CHECK(runner == (cc_task_t *)storage);
+    CHECK(a != CC_NULL && b != CC_NULL && runner != CC_NULL);
+
+    cc_task_t *cur = runner;
+    CHECK(cc_task_resume(&cur) == cc_tr_yield);
+    CHECK(cc_task_resume(&cur) == cc_tr_yield);
+    CHECK(cc_task_resume(&cur) == cc_tr_yield);
+    CHECK(cc_task_resume(&cur) == cc_tr_end && cur == CC_NULL);
+    CHECK(CC_CTX(a, nm_ctx)->value == 2 && CC_CTX(b, nm_ctx)->value == 12);
+    CHECK(cc_task_ended(a) == CC_TRUE && cc_task_ended(b) == CC_TRUE);
+    CHECK(cc_task_ended(runner) == CC_TRUE && runner->ext == CC_NULL);
+}
+#endif // CC_CFG_TASK_CONV
+
 int main(void)
 {
 #if CC_CFG_TASK_BLOCK
@@ -169,6 +206,7 @@ int main(void)
 #endif
 #if CC_CFG_TASK_CONV
     test_conv_init();
+    test_runner_init();
 #endif
 #if CC_CFG_TASK_STACKFUL
     test_stack_conv_init();

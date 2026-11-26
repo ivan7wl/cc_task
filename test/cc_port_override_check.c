@@ -87,5 +87,23 @@ int main(void)
 #endif
 
     printf("cc_port_override: task slot + panic + root auto free replaced, cc_swap not used\n");
+
+    cc_task_t *a = cc_task_new(CC_TASK(t) { CC_BEGIN(t); CC_END(t); });
+    cc_task_t *b = cc_task_new(CC_TASK(t) { CC_BEGIN(t); CC_END(t); });
+    cc_task_t *runner = cc_runner_new(a, b);
+    if (runner == NULL)
+    {
+        printf("cc_port_override: runner allocation FAILED\n");
+        return 1;
+    }
+    cc_task_t *cur = runner;
+    if (cc_task_resume(&cur) != cc_tr_yield || cc_task_resume(&cur) != cc_tr_end ||
+        cur != NULL || s_allocs != 4 || s_frees != 4)
+    {
+        printf("cc_port_override: runner single block FAILED (alloc=%d free=%d)\n", s_allocs, s_frees);
+        return 1;
+    }
+    printf("cc_port_override: runner uses one initial block allocation\n");
+
     return 0;
 }

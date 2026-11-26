@@ -7,13 +7,13 @@
 
 #define GUARD_EXIT 86
 
-#if CC_CFG_TASK_STACKFUL
-
 void cc_tstack_guard_panic(const char *file, int line, const char *expr)
 {
     printf("cc_tstack_guard: panic at %s:%d: %s\n", file, line, expr);
     exit(GUARD_EXIT);
 }
+
+#if CC_CFG_TASK_STACKFUL
 
 int main(void)
 {

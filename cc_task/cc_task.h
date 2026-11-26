@@ -15,6 +15,7 @@
 #include "cc_port.h"
 #include "cc_task_conv.h"
 #include "cc_task_stackful.h"
+#include "cc_runner.h"
 
 #ifdef __cplusplus
 extern "C" {

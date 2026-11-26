@@ -69,8 +69,8 @@ endif
 endif
 
 # library source
-LIB         :=  $(SRC)/cc_task.c $(SRC)/cc_task_conv.c $(SRC)/cc_task_stackful.c $(SRC)/cc_port.c
-LIB_NM      :=  $(SRC)/cc_task.c $(SRC)/cc_task_conv.c $(SRC)/cc_task_stackful.c
+LIB         :=  $(SRC)/cc_task.c $(SRC)/cc_task_conv.c $(SRC)/cc_task_stackful.c $(SRC)/cc_runner.c $(SRC)/cc_port.c
+LIB_NM      :=  $(SRC)/cc_task.c $(SRC)/cc_task_conv.c $(SRC)/cc_task_stackful.c $(SRC)/cc_runner.c
 
 CHECK_BINS  :=  $(OUT)/cc_swap_check $(OUT)/cc_swap_nostk $(OUT)/cc_port_check \
                 $(OUT)/cc_helper_check $(OUT)/cc_pp_check $(OUT)/cc_primitive_check $(OUT)/cc_types_check \
@@ -78,7 +78,7 @@ CHECK_BINS  :=  $(OUT)/cc_swap_check $(OUT)/cc_swap_nostk $(OUT)/cc_port_check \
 ifeq ($(CC_CFG_USE_MALLOC),1)
 CHECK_BINS  +=  $(OUT)/cc_tstack_check $(OUT)/cc_tstack_noblk $(OUT)/cc_tstack_nostk
 ifeq ($(CC_CFG_TASK_CONV),1)
-CHECK_BINS  +=  $(OUT)/cc_task_conv_check $(OUT)/cc_task_conv_noblk
+CHECK_BINS  +=  $(OUT)/cc_task_conv_check $(OUT)/cc_task_conv_noblk $(OUT)/cc_runner_check
 endif
 ifeq ($(CC_CFG_TASK_BLOCK),1)
 CHECK_BINS  +=  $(OUT)/cc_port_override_check $(OUT)/cc_task_layout_check $(OUT)/cc_task_check
@@ -112,6 +112,8 @@ ifeq ($(CC_CFG_USE_MALLOC),1)
 	@echo "[check] cc_task_conv: function body, ctx / await ok"
 	@$(OUT)/cc_task_conv_noblk || { echo "[check] cc_task_conv (no -fblocks) FAILED"; exit 1; }
 	@echo "[check] cc_task_conv: no -fblocks, function body ok"
+	@$(OUT)/cc_runner_check || { echo "[check] cc_runner FAILED"; exit 1; }
+	@echo "[check] cc_runner: ready/wait/current/add/nested ok"
 endif
 endif
 	@$(OUT)/cc_types_check; rc=$$?; \
@@ -195,12 +197,12 @@ $(OUT)/cc_port_check: $(TEST)/cc_port_check.c $(SRC)/cc_port.c $(SRC)/cc_port.h 
 	$(CC) $(CFG_FLAGS) $(CFLAGS) $(INC) -o $@ $(TEST)/cc_port_check.c $(SRC)/cc_port.c $(LDFLAGS)
 
 # a port header replaces the accessors and the panic, so cc_port.c is not linked
-$(OUT)/cc_port_override_check: $(TEST)/cc_port_override_check.c $(TEST)/cc_port_override.h $(SRC)/cc_task.c \
-                               $(SRC)/cc_task.h $(SRC)/cc_task_conv.h $(SRC)/cc_task_stackful.h $(SRC)/cc_primitive.h \
+$(OUT)/cc_port_override_check: $(TEST)/cc_port_override_check.c $(TEST)/cc_port_override.h $(SRC)/cc_task.c $(SRC)/cc_runner.c \
+                               $(SRC)/cc_task.h $(SRC)/cc_runner.h $(SRC)/cc_list.h $(SRC)/cc_task_conv.h $(SRC)/cc_task_stackful.h $(SRC)/cc_primitive.h \
                                $(SRC)/cc_pp.h $(SRC)/cc_port.h $(SRC)/cc_swap.h $(SRC)/cc_types.h $(SRC)/cc_lc.h
 	@mkdir -p $(OUT)
 	$(CC) $(CFG_FLAGS_NS) $(CFLAGS) $(INC) -I$(TEST) -DCC_PORT_INCLUDE='"cc_port_override.h"' \
-		-o $@ $(TEST)/cc_port_override_check.c $(SRC)/cc_task.c $(LDFLAGS)
+		-o $@ $(TEST)/cc_port_override_check.c $(SRC)/cc_task.c $(SRC)/cc_runner.c $(LDFLAGS)
 
 $(OUT)/cc_primitive_check: $(TEST)/cc_primitive_check.c $(LIB) $(SRC)/cc_primitive.h $(SRC)/cc_pp.h $(SRC)/cc_task.h $(SRC)/cc_port.h $(SRC)/cc_swap.h $(SRC)/cc_types.h $(SRC)/cc_lc.h
 	@mkdir -p $(OUT)
@@ -221,6 +223,10 @@ $(OUT)/cc_task_conv_check: $(TEST)/cc_task_conv_check.c $(LIB) $(SRC)/cc_task_co
 $(OUT)/cc_task_conv_noblk: $(TEST)/cc_task_conv_check.c $(LIB) $(SRC)/cc_task_conv.h $(SRC)/cc_task.h $(SRC)/cc_task_stackful.h $(SRC)/cc_primitive.h $(SRC)/cc_pp.h $(SRC)/cc_port.h $(SRC)/cc_swap.h $(SRC)/cc_types.h $(SRC)/cc_lc.h
 	@mkdir -p $(OUT)
 	$(CC) $(CFG_FLAGS_NB) $(CFLAGS_NB) $(INC) -o $@ $(TEST)/cc_task_conv_check.c $(LIB) $(LDFLAGS)
+
+$(OUT)/cc_runner_check: $(TEST)/cc_runner_check.c $(LIB) $(SRC)/cc_runner.h $(SRC)/cc_list.h $(SRC)/cc_task.h $(SRC)/cc_task_stackful.h $(SRC)/cc_primitive.h $(SRC)/cc_pp.h $(SRC)/cc_port.h $(SRC)/cc_swap.h $(SRC)/cc_types.h $(SRC)/cc_lc.h
+	@mkdir -p $(OUT)
+	$(CC) $(CFG_FLAGS) $(CFLAGS) $(INC) -o $@ $(TEST)/cc_runner_check.c $(LIB) $(LDFLAGS)
 
 $(OUT)/cc_pp_check: $(TEST)/cc_pp_check.c $(SRC)/cc_pp.h $(SRC)/cc_helper.h
 	@mkdir -p $(OUT)
