@@ -237,7 +237,7 @@ typedef struct _cc_task_t
 | `next` | 后继任务。本任务结束时恢复它；没有后继时任务链结束 |
 | `lc` | 恢复点。`0` 是入口，`CC_LC_DONE`（`0xFFFF`）表示已结束，`CC_LC_ABORT`（`0xFFFE`）表示已请求 abort |
 | `ctx_size` | `ctx` 大小，单位字节，最大 65535。捕获变量或传统任务中指定的 `ctx` 上下文大小。 |
-| `flags` | `cc_tf_abort`：已请求 abort。`cc_tf_retain`：调用方提供的内存，结束时不释放 |
+| `flags` | `cc_tf_abort`：已请求 abort。`cc_tf_retain`：调用方提供的内存，结束时不释放。`cc_tf_runner`：该 task 是 runner |
 | `fn` | 保留给 block 的 invoke 槽，调用方不要直接写入 |
 | `ext` | 通用扩展上下文；没有库扩展占用时为 NULL |
 | `ctx` | 柔性数组，实际大小为 `ctx_size`。是捕获变量或传统任务的上下文。传统任务中可以用 `CC_CTX(t, type)` 访问 |

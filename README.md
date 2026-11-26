@@ -232,7 +232,7 @@ typedef struct _cc_task_t
 | `next` | Continuation resumed when this task ends. The chain ends if there is no continuation. |
 | `lc` | Resume point. `0` is the entry, `CC_LC_DONE` (`0xFFFF`) means ended, and `CC_LC_ABORT` (`0xFFFE`) means abort requested. |
 | `ctx_size` | Size of `ctx` in bytes, up to 65535: captured-variable storage or a conventional task's explicit context size. |
-| `flags` | `cc_tf_abort`: abort requested. `cc_tf_retain`: caller-provided memory, not freed on completion. |
+| `flags` | `cc_tf_abort`: abort requested. `cc_tf_retain`: caller-provided memory, not freed on completion. `cc_tf_runner`: task is a runner. |
 | `fn` | Reserved for the block invoke slot; callers must not write it directly. |
 | `ext` | Generic extension context; NULL unless a library extension owns it. |
 | `ctx` | Flexible array of `ctx_size` bytes holding captures or conventional-task context. Use `CC_CTX(t, type)` for conventional tasks. |

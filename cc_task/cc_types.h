@@ -95,6 +95,7 @@ typedef enum _cc_tf_e
     cc_tf_none   = 0,
     cc_tf_abort  = CC_BIT(0),   // an abort was requested
     cc_tf_retain = CC_BIT(1),   // never freed by the library, cc_task_init() storage
+    cc_tf_runner = CC_BIT(2),   // this task is a runner task group
 } cc_tf_e;
 
 //--------------------------------------------------------------------------------------------------------
