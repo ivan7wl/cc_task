@@ -87,7 +87,7 @@ static cc_run_node_t *_cc_list_pop(cc_run_list_t *head)
 static cc_runner_ctx_t *_cc_runner_pre_init(void *mem, cc_size size, int n)
 {
     cc_size need = cc_runner_size(n);
-    if (need == 0 || size < need || ((cc_uintptr)mem & (__alignof__(cc_task_t) - 1)) != 0)
+    if (need == 0 || size < need || !CC_IS_ALIGNED(mem, CC_ALIGNOF(cc_task_t)))
     {
         return CC_NULL;
     }

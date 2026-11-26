@@ -110,7 +110,8 @@ cc_task_t *cc_task_new(cc_task_func blk)
 cc_task_t *cc_task_init(void *mem, cc_size size, cc_task_func blk)
 {
     cc_size n = _cc_ctx_bytes(blk);
-    if (CC_UNLIKELY(n == (cc_size)-1 || size < CC_TASK_SIZE(n)))
+    if (CC_UNLIKELY(n == (cc_size)-1 || size < CC_TASK_SIZE(n) ||
+                    !CC_IS_ALIGNED(mem, CC_ALIGNOF(cc_task_t))))
     {
         return CC_NULL;
     }

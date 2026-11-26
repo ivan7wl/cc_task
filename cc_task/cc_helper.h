@@ -18,6 +18,10 @@
 #define CC_ARRAY_SIZE(a)            ((__SIZE_TYPE__)sizeof(a) / (__SIZE_TYPE__)sizeof((a)[0]))
 #define CC_BIT(n)                   (1u << (n))
 
+// alignment helpers; align must be non-zero (typically CC_ALIGNOF(type))
+#define CC_ALIGNOF(t)               __alignof__(t)
+#define CC_IS_ALIGNED(p, align)     (((__UINTPTR_TYPE__)(p) % (__UINTPTR_TYPE__)(align)) == 0)
+
 // round n down / up to a multiple of a, a should be a power of two
 #define CC_ALIGN_DOWN(n, a)         ((n) & ~((a) - 1))
 #define CC_ALIGN_UP(n, a)           (((n) + ((a) - 1)) & ~((a) - 1))

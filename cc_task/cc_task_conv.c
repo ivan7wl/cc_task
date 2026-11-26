@@ -56,7 +56,8 @@ cc_task_t *cc_tconv_new(cc_tconv_func func, CC_NULLABLE const void *ctx, cc_size
 cc_task_t *cc_tconv_init(void *mem, cc_size size, cc_tconv_func func,
                          CC_NULLABLE const void *ctx, cc_size ctx_size)
 {
-    if (CC_UNLIKELY(ctx_size > 0xFFFFu || size < CC_TASK_SIZE(ctx_size)))
+    if (CC_UNLIKELY(ctx_size > 0xFFFFu || size < CC_TASK_SIZE(ctx_size) ||
+                    !CC_IS_ALIGNED(mem, CC_ALIGNOF(cc_task_t))))
     {
         return CC_NULL;
     }

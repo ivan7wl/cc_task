@@ -10,6 +10,9 @@
 // the task base must be 8B aligned
 // ctx size is padded to make sure control block is 16B aligned
 
+// the task base is required to be 8B aligned by the stackful layout
+#define CC_TSTACK_ALIGN_BASE    8
+
 // the control block, the stack start and its bottom 16 bytes are 16B aligned
 #define CC_TSTACK_ALIGN         16
 
@@ -31,6 +34,7 @@ typedef struct _cc_tstack_t
 CC_STATIC_ASSERT(sizeof(cc_tstack_t) == 4 * CC_PTR_SIZE, "cc_tstack_t: 32 bytes on LP64, 16 on ILP32");
 CC_STATIC_ASSERT(CC_OFFSETOF(cc_tstack_t, stack) == sizeof(cc_tstack_t), "cc_tstack_t: stack");
 CC_STATIC_ASSERT(CC_OFFSETOF(cc_tstack_t, canary) == sizeof(cc_tstack_t), "cc_tstack_t: canary");
+CC_STATIC_ASSERT(CC_TSTACK_ALIGN_BASE >= CC_ALIGNOF(cc_task_t), "cc_tstack_t: base alignment");
 
 //--------------------------------------------------------------------------------------------------------
 
@@ -294,7 +298,7 @@ cc_task_t *cc_tstack_init(void *mem, cc_size size, cc_task_func blk)
 
     cc_size n    = task - CC_OFFSETOF(cc_task_t, ctx);
     cc_size need = _cc_tstack_max_size(n, 16); // min size of the task
-    if (CC_UNLIKELY(need == 0 || size < need || ((cc_uintptr)mem & 7) != 0)) // invalid storage
+    if (CC_UNLIKELY(need == 0 || size < need || !CC_IS_ALIGNED(mem, CC_TSTACK_ALIGN_BASE))) // invalid storage
     {
         return CC_NULL;
     }
@@ -345,7 +349,7 @@ cc_task_t *cc_tstack_conv_init(void *mem, cc_size size, cc_tconv_func func,
                                CC_NULLABLE const void *ctx, cc_size ctx_size)
 {
     cc_size need = _cc_tstack_max_size(ctx_size, 16); // min size of the task
-    if (CC_UNLIKELY(need == 0 || size < need || ((cc_uintptr)mem & 7) != 0)) // invalid storage
+    if (CC_UNLIKELY(need == 0 || size < need || !CC_IS_ALIGNED(mem, CC_TSTACK_ALIGN_BASE))) // invalid storage
     {
         return CC_NULL;
     }
