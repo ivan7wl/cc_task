@@ -15,7 +15,7 @@
 #endif
 
 #define CC_OFFSETOF(t, m)           __builtin_offsetof(t, m)
-#define CC_ARRAY_SIZE(a)            (sizeof(a) / sizeof((a)[0]))
+#define CC_ARRAY_SIZE(a)            ((__SIZE_TYPE__)sizeof(a) / (__SIZE_TYPE__)sizeof((a)[0]))
 #define CC_BIT(n)                   (1u << (n))
 
 // round n down / up to a multiple of a, a should be a power of two
