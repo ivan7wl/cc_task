@@ -23,12 +23,26 @@
 //-------------------------------------------------------------------------------------------------------
 
 // get container (entry) type
-#define cc_list_type(head)                  typeof(*((head)->next))
+#define cc_list_type(head)                  __typeof__(*((head)->next))
+
+#define cc_list_entry_raw(head, field)      ((cc_list_type(head) *)((unsigned char *)(head) - __builtin_offsetof(cc_list_type(head), field)))
+
+// Keep the shadow-container address opaque to the optimizer.
+// Input-only asm plus the memory clobber avoids the extra output-register move;
+// the "memory" clobber is still required for GCC, otherwise it may reuse a stale head.next.
+#if defined(__GNUC__) || defined(__clang__)
+#define cc_list_entry(head, field)          ({                                                                  \
+                                                __UINTPTR_TYPE__ _addr = (__UINTPTR_TYPE__)(head) -             \
+                                                    __builtin_offsetof(cc_list_type(head), field);              \
+                                                cc_list_type(head) *_container = (cc_list_type(head) *)_addr;   \
+                                                __asm__ __volatile__("" : : "r"(_container) : "memory");        \
+                                                _container;                                                     \
+                                            })
+#else
+#define cc_list_entry(head, field)          cc_list_entry_raw(head, field)
+#endif
 
 // get shadow container of list head
-#define cc_list_entry(head, field)          ((cc_list_type(head) *)((char *)(head) - __builtin_offsetof(cc_list_type(head), field)))
-
-// get list node from entry
 #define cc_list_node(entry, field)          (&(entry)->field)
 
 #define cc_list_first(head)                 ((head)->next)
@@ -42,52 +56,52 @@
 //-------------------------------------------------------------------------------------------------------
 
 // init a list head, field is the field name of node in container struct
-#define cc_list_init(head, field)           ({ typeof(head) _h = (head); (_h)->next = (_h)->prev = cc_list_entry(_h, field); })
+#define cc_list_init(head, field)           ({                                                                  \
+                                                cc_list_type(head) *_e = cc_list_entry((head), field);          \
+                                                _e->field.next = _e->field.prev = _e;                           \
+                                            })
 
-#define CC_LIST_HEAD_INIT(head, field)      { cc_list_entry(head, field), cc_list_entry(head, field) }
+#define CC_LIST_HEAD_INIT(head, field)      { cc_list_entry_raw(head, field), cc_list_entry_raw(head, field) }
 
-#define cc_list_is_empty(head, field)       ({ typeof(head) _h = (head); _h->next == cc_list_entry(_h, field); })
+#define cc_list_is_empty(head, field)       ({                                                                  \
+                                                cc_list_type(head) *_e = cc_list_entry((head), field);          \
+                                                _e->field.next == _e;                                           \
+                                            })
 
 // insert entry b between a and c
 #define cc_list_insert(a, b, c, field)      do                                                                  \
                                             {                                                                   \
-                                                typeof(a) _a = (a);                                             \
-                                                typeof(b) _b = (b);                                             \
-                                                typeof(c) _c = (c);                                             \
+                                                __typeof__(a) _a = (a);                                         \
+                                                __typeof__(b) _b = (b);                                         \
+                                                __typeof__(c) _c = (c);                                         \
+                                                _c->field.prev = _b;                                            \
                                                 _b->field.next = _c;                                            \
                                                 _b->field.prev = _a;                                            \
                                                 _a->field.next = _b;                                            \
-                                                _c->field.prev = _b;                                            \
                                             } while (0)
 
 // delete entry from list
 #define cc_list_del(entry, field)           do                                                                  \
                                             {                                                                   \
-                                                typeof(entry) _e = (entry);                                     \
-                                                cc_list_prev(_e, field)->field.next = _e->field.next;           \
-                                                cc_list_next(_e, field)->field.prev = _e->field.prev;           \
+                                                __typeof__(entry) _e = (entry);                                 \
+                                                __typeof__(_e)    _p = cc_list_prev(_e, field);                 \
+                                                __typeof__(_e)    _n = cc_list_next(_e, field);                 \
+                                                _n->field.prev = _p;                                            \
+                                                _p->field.next = _n;                                            \
                                             } while (0)
 
 // add entry to the first of list
 #define cc_list_add(head, entry, field)     do                                                                  \
                                             {                                                                   \
-                                                typeof(head) _h  = (head);                                      \
-                                                typeof(entry) _e = (entry);                                     \
-                                                _e->field.next = _h->next;                                      \
-                                                _e->field.prev = cc_list_entry(_h, field);                      \
-                                                _h->next = _e;                                                  \
-                                                cc_list_next(_e, field)->field.prev = _e;                       \
+                                                cc_list_type(head) *_e = cc_list_entry((head), field);          \
+                                                cc_list_insert(_e, (entry), _e->field.next, field);             \
                                             } while (0)
 
 // add entry to the last of list
-#define cc_list_add_tail(h, e, f)           do                                                                  \
+#define cc_list_add_tail(head, entry, field) do                                                                 \
                                             {                                                                   \
-                                                typeof(h) _h = (h);                                             \
-                                                typeof(e) _e = (e);                                             \
-                                                _e->f.next = cc_list_entry(_h, f);                              \
-                                                _e->f.prev = _h->prev;                                          \
-                                                _h->prev->f.next = _e;                                          \
-                                                _h->prev = _e;                                                  \
+                                                cc_list_type(head) *_e = cc_list_entry((head), field);          \
+                                                cc_list_insert(_e->field.prev, (entry), _e, field);             \
                                             } while (0)
 
 //-------------------------------------------------------------------------------------------------------
