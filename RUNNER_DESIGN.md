@@ -151,7 +151,7 @@ ctx_bytes = CC_OFFSETOF(cc_runner_ctx_t, nodes)
 total     = CC_TASK_SIZE(ctx_bytes);
 ```
 
-`cc_runner_size_n()` 必须在转换 n 和乘法、加法前检查溢出，并在 `ctx_bytes > 65535` 时返回 0，因为 `runner.ctx_size` 是 `cc_u16`。runner.ctx_size 记录包含内联 nodes 的完整 ctx 大小。初始内联 node 数量因此有上限；超过该上限的任务通过动态 add 扩展。
+`cc_runner_size()` 必须在转换 n 和乘法、加法前检查溢出，并在 `ctx_bytes > 65535` 时返回 0，因为 `runner.ctx_size` 是 `cc_u16`。runner.ctx_size 记录包含内联 nodes 的完整 ctx 大小。初始内联 node 数量因此有上限；超过该上限的任务通过动态 add 扩展。
 
 `new_n` 分配 total 字节并把 runner 标记为自动释放；`init_n` 使用调用方 block 并标记 retain。初始内联 node 在任务链 end 时只停用，不单独 free；动态 add 的 node 则在对应任务链 end 时单独释放。
 
@@ -160,7 +160,7 @@ total     = CC_TASK_SIZE(ctx_bytes);
 ### 4.1 形式
 
 ```c
-cc_size cc_runner_size_n(int n);
+cc_size cc_runner_size(int n);
 
 cc_task_t *cc_runner_init_n(void *mem, cc_size size, int n, ...);
 cc_task_t *cc_runner_new_n(int n, ...);
@@ -184,7 +184,7 @@ cc_runner_new_n(4, a, b, c, d);
 ### 4.2 无 malloc 初始化
 
 ```c
-cc_size size = cc_runner_size_n(3);
+cc_size size = cc_runner_size(3);
 void *mem = alloc_runner_storage(size); // 项目自己的 storage
 cc_task_t *runner = cc_runner_init_n(mem, size, 3, a, b, c);
 ```
@@ -564,7 +564,7 @@ R1 node: A → R2 → A
 以下接口始终可用，不依赖 malloc：
 
 ```c
-cc_size cc_runner_size_n(int n);
+cc_size cc_runner_size(int n);
 cc_task_t *cc_runner_init_n(void *mem, cc_size size, int n, ...);
 ```
 

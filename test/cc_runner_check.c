@@ -351,12 +351,12 @@ static void test_self_inclusive_runner(void)
 
 static void test_init_and_invalid_creation(void)
 {
-    CHECK(cc_runner_size_n(0) == 0);
-    CHECK(cc_runner_size_n(-1) == 0);
-    CHECK(cc_runner_size_n(1) > 0);
+    CHECK(cc_runner_size(0) == 0);
+    CHECK(cc_runner_size(-1) == 0);
+    CHECK(cc_runner_size(1) > 0);
 
     static CC_ALIGN(16) cc_u8 mem[4096];
-    cc_size size = cc_runner_size_n(2);
+    cc_size size = cc_runner_size(2);
     CHECK(size != 0 && size <= sizeof(mem));
     cc_task_t *a = cc_tconv_new(yield_a, CC_NULL, 0);
     cc_task_t *b = cc_tconv_new(yield_b, CC_NULL, 0);

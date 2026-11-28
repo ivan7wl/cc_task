@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include "cc_helper.h"
 #include "cc_task.h"
 #include "cc_list.h"
 
@@ -57,6 +58,7 @@ cc_size cc_runner_size(int n)
     {
         return 0; // runner.ctx_size is a cc_u16
     }
+
     return CC_TASK_SIZE(fixed + count * sizeof(cc_run_node_t));
 }
 
@@ -87,7 +89,7 @@ static cc_run_node_t *_cc_list_pop(cc_run_list_t *head)
 static cc_runner_ctx_t *_cc_runner_pre_init(void *mem, cc_size size, int n)
 {
     cc_size need = cc_runner_size(n);
-    if (need == 0 || size < need || !CC_IS_ALIGNED(mem, CC_ALIGNOF(cc_task_t)))
+    if (CC_UNLIKELY(need == 0 || size < need || !CC_IS_ALIGNED(mem, CC_ALIGNOF(cc_task_t))))
     {
         return CC_NULL;
     }
@@ -95,62 +97,71 @@ static cc_runner_ctx_t *_cc_runner_pre_init(void *mem, cc_size size, int n)
     return CC_CTX((cc_task_t *)mem, cc_runner_ctx_t);
 }
 
-static cc_task_t *_cc_runner_post_init(void *mem, int n, cc_u32 flags)
+static cc_bool _cc_runner_validate_tasks(cc_runner_ctx_t *ctx, int n, cc_task_t *owner,
+                                         CC_INOUT cc_task_t **self)
 {
-    cc_task_t *runner = (cc_task_t *)mem;
-    cc_runner_ctx_t *ctx = CC_CTX(runner, cc_runner_ctx_t);
-    cc_task_t *current = cc_task_current();
-    cc_task_t *self = CC_NULL;
-
-    // The inline array already holds the candidate task pointers. Validate all of
-    // them before modifying tasks or publishing the runner.
     for (int i = 0; i < n; ++i)
     {
         cc_task_t *task = ctx->nodes[i].task;
-        if (task->fn == CC_NULL || task->ext != CC_NULL ||
-            cc_task_ended(task) || (task->next != CC_NULL && task != current))
+        if (CC_UNLIKELY(task->fn == CC_NULL || task->ext != CC_NULL || cc_task_ended(task)
+            || (task->next != CC_NULL && task != owner)))
         {
-            return CC_NULL;
+            return CC_FALSE;
         }
-        if (task == current)
+
+        if (task == owner) // owner task add self to runner
         {
-            if (self != CC_NULL)
+            if (CC_UNLIKELY(*self != CC_NULL))
             {
-                return CC_NULL;
+                return CC_FALSE;
             }
-            self = task;
+            *self = owner;
         }
+
         for (int j = 0; j < i; ++j)
         {
-            if (ctx->nodes[j].task == task)
+            if (CC_UNLIKELY(ctx->nodes[j].task == task))
             {
-                return CC_NULL;
+                return CC_FALSE;
             }
         }
     }
+    return CC_TRUE;
+}
 
-    cc_task_t *up = self != CC_NULL ? self->next : CC_NULL;
-    runner->next = up;
-    runner->ctx_size = (cc_u16)(CC_OFFSETOF(cc_runner_ctx_t, nodes) +
-                                (cc_size)n * sizeof(cc_run_node_t));
-    runner->flags = flags | cc_tf_runner;
-    runner->fn = (void (*)(void))_cc_runner_body;
-    runner->ext = CC_NULL;
+static cc_task_t *_cc_runner_post_init(void *mem, int n, cc_u32 flags)
+{
+    cc_task_t *runner    = (cc_task_t *)mem;
+    cc_runner_ctx_t *ctx = CC_CTX(runner, cc_runner_ctx_t);
+    cc_task_t *owner     = cc_task_current();
+    cc_task_t *self      = CC_NULL; // not null if owner add self to runner
+
+    if (CC_UNLIKELY(!_cc_runner_validate_tasks(ctx, n, owner, &self)))
+    {
+        return CC_NULL;
+    }
+
+    runner->next     = self != CC_NULL ? self->next : CC_NULL; // runner continue owner's next
+    runner->ctx_size = (cc_u16)(CC_OFFSETOF(cc_runner_ctx_t, nodes) + (cc_size)n * sizeof(cc_run_node_t));
+    runner->flags    = flags | cc_tf_runner;
+    runner->fn       = (void (*)(void))_cc_runner_body;
+    runner->ext      = CC_NULL;
     CC_LC_INIT(runner->lc);
 
     cc_list_init(&ctx->ready, link);
     cc_list_init(&ctx->free, link);
-    ctx->alive = (cc_u32)n;
+    ctx->alive    = (cc_u32)n;
     ctx->capacity = (cc_u16)n;
 
     for (int i = 0; i < n; ++i)
     {
         cc_run_node_t *node = &ctx->nodes[i];
-        node->original_fn = CC_NULL;
-        node->runner = runner;
-        node->flags = 0;
+        node->original_fn   = CC_NULL;
+        node->runner        = runner;
+        node->flags         = 0;
         _cc_ready_push(runner, node);
     }
+
     if (self != CC_NULL)
     {
         self->next = CC_NULL;
@@ -163,10 +174,11 @@ static cc_task_t *_cc_runner_post_init(void *mem, int n, cc_u32 flags)
 static cc_task_t *_cc_runner_vinit(void *mem, cc_size size, int n, cc_u32 flags, va_list ap)
 {
     cc_runner_ctx_t *ctx = _cc_runner_pre_init(mem, size, n);
-    if (ctx == CC_NULL)
+    if (CC_UNLIKELY(ctx == CC_NULL))
     {
         return CC_NULL;
     }
+
     for (int i = 0; i < n; ++i)
     {
         ctx->nodes[i].task = va_arg(ap, cc_task_t *);
@@ -189,10 +201,11 @@ static cc_task_t *_cc_runner_ainit(void *mem, cc_size size, int n, cc_u32 flags,
                                    cc_task_t *const tasks[])
 {
     cc_runner_ctx_t *ctx = _cc_runner_pre_init(mem, size, n);
-    if (ctx == CC_NULL)
+    if (CC_UNLIKELY(ctx == CC_NULL))
     {
         return CC_NULL;
     }
+
     for (int i = 0; i < n; ++i)
     {
         ctx->nodes[i].task = tasks[i];
@@ -212,13 +225,13 @@ cc_task_t *cc_runner_init_a(void *mem, cc_size size, int n, cc_task_t *const tas
 cc_task_t *cc_runner_new_n(int n, ...)
 {
     cc_size size = cc_runner_size(n);
-    if (size == 0)
+    if (CC_UNLIKELY(size == 0))
     {
         return CC_NULL;
     }
 
     void *mem = CC_PORT_MALLOC(size);
-    if (mem == CC_NULL)
+    if (CC_UNLIKELY(mem == CC_NULL))
     {
         return CC_NULL;
     }
@@ -227,7 +240,8 @@ cc_task_t *cc_runner_new_n(int n, ...)
     va_start(ap, n);
     cc_task_t *runner = _cc_runner_vinit(mem, size, n, cc_tf_none, ap);
     va_end(ap);
-    if (runner == CC_NULL)
+
+    if (CC_UNLIKELY(runner == CC_NULL))
     {
         CC_PORT_FREE(mem);
     }
@@ -237,26 +251,25 @@ cc_task_t *cc_runner_new_n(int n, ...)
 cc_task_t *cc_runner_new_a(int n, cc_task_t *const tasks[])
 {
     cc_size size = cc_runner_size(n);
-    if (size == 0)
+    if (CC_UNLIKELY(size == 0))
     {
         return CC_NULL;
     }
+
     void *mem = CC_PORT_MALLOC(size);
-    if (mem == CC_NULL)
+    if (CC_UNLIKELY(mem == CC_NULL))
     {
         return CC_NULL;
     }
 
     cc_task_t *runner = _cc_runner_ainit(mem, size, n, cc_tf_none, tasks);
-    if (runner == CC_NULL)
+    if (CC_UNLIKELY(runner == CC_NULL))
     {
         CC_PORT_FREE(mem);
     }
     return runner;
 }
-#endif // CC_CFG_USE_MALLOC
 
-#if CC_CFG_USE_MALLOC
 cc_bool cc_runner_add(cc_task_t *runner, cc_task_t *task)
 {
     if (!(runner->flags & cc_tf_runner) || runner == task ||
@@ -307,7 +320,10 @@ cc_bool cc_runner_add(cc_task_t *runner, cc_task_t *task)
     ctx->alive++;
     return CC_TRUE;
 }
+
 #endif // CC_CFG_USE_MALLOC
+
+//--------------------------------------------------------------------------------------------------------
 
 static void _cc_retire_node(cc_run_node_t *node)
 {

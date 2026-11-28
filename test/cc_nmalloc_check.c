@@ -182,7 +182,7 @@ static void test_runner_init(void)
     nm_ctx ca = { 0 }, cb = { 10 };
     cc_task_t *a = cc_tconv_init(ma, sizeof(ma), nm_runner_body, &ca, sizeof(ca));
     cc_task_t *b = cc_tconv_init(mb, sizeof(mb), nm_runner_body, &cb, sizeof(cb));
-    cc_size size = cc_runner_size_n(2);
+    cc_size size = cc_runner_size(2);
     CHECK(size != 0 && size <= sizeof(storage));
     cc_task_t *runner = cc_runner_init_n(storage, size, 2, a, b);
     CHECK(runner == (cc_task_t *)storage);
