@@ -68,7 +68,7 @@ static void test_ready_fifo(void)
     cc_task_t *b = cc_tconv_new(yield_b, CC_NULL, 0);
     cc_task_t *runner = cc_runner_new(a, b);
     CHECK(a != CC_NULL && b != CC_NULL && runner != CC_NULL);
-    CHECK(a->ext == CC_NULL && b->ext == CC_NULL);
+    CHECK(a->ext != CC_NULL && b->ext != CC_NULL); // READY tasks link back to their nodes
 
     cc_task_t *cur = runner;
     CHECK(cc_task_resume(&cur) == cc_tr_yield && cur == runner);
@@ -120,7 +120,7 @@ static void test_wait_wake(void)
 
     cur = a;
     CHECK(cc_task_resume(&cur) == cc_tr_yield && cur == runner);
-    CHECK(a->ext == CC_NULL);
+    CHECK(a->ext != CC_NULL); // requeued as READY
     expect_trace("axb");
     CHECK(cc_task_resume(&cur) == cc_tr_wait && cur == runner);
     expect_trace("axbc");
@@ -280,6 +280,7 @@ static cc_tr_e add_parent(cc_task_t *t, void *_, void *ctx)
     CC_BEGIN(t);
     mark('a');
     CC_YIELD(t);
+    CHECK(cc_runner_add(g_runner, t) == CC_FALSE); // RUNNING/current self
     CHECK(cc_runner_add(g_runner, g_added) == CC_TRUE);
     mark('b');
     CC_YIELD(t);
@@ -377,9 +378,13 @@ static void test_init_and_invalid_creation(void)
     void (*cfn)(void) = c->fn;
     CHECK(cc_runner_init_n(mem, size - 1, 2, c, d) == CC_NULL);
     CHECK(c->fn == cfn && c->ext == CC_NULL && c->next == CC_NULL);
-    CHECK(cc_runner_new(c, c) == CC_NULL);
-    CHECK(c->fn == cfn && c->ext == CC_NULL && c->next == CC_NULL);
-    cc_task_free(c);
+    cc_task_t *managed = cc_runner_new(c);
+    CHECK(managed != CC_NULL);
+    CHECK(cc_runner_new(c, d) == CC_NULL); // already managed by another runner
+    CHECK(c->fn == cfn && c->ext != CC_NULL && c->next == CC_NULL);
+    cur = managed;
+    CHECK(cc_task_resume(&cur) == cc_tr_yield && cur == managed);
+    CHECK(cc_task_resume(&cur) == cc_tr_end && cur == CC_NULL);
     cc_task_free(d);
 }
 
@@ -416,7 +421,7 @@ static void test_stackful_member(void)
 
     cc_task_t *cur = runner;
     CHECK(cc_task_resume(&cur) == cc_tr_yield && cur == runner);
-    CHECK(cc_tstack_is_stackful(task) == CC_TRUE && task->ext == CC_NULL);
+    CHECK(cc_tstack_is_stackful(task) == CC_TRUE && task->ext != CC_NULL);
     CHECK(cc_task_resume(&cur) == cc_tr_wait && cur == runner);
     CHECK(task->ext != CC_NULL);
 
@@ -447,6 +452,8 @@ static void test_add_allocates_when_free_empty(void)
     cc_task_t *runner = cc_runner_new(a);
     CHECK(runner != CC_NULL && g_add_early != CC_NULL);
     CHECK(cc_runner_add(runner, g_add_early) == CC_TRUE); // FREE empty: dynamic node
+    CHECK(g_add_early->ext != CC_NULL);
+    CHECK(cc_runner_add(runner, g_add_early) == CC_FALSE); // already READY
     CHECK(cc_runner_add(runner, runner) == CC_FALSE);
 
     cc_task_t *cur = runner;

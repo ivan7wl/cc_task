@@ -18,7 +18,8 @@ extern "C" {
 cc_size cc_runner_size(int n);
 
 /** Initialize a retained runner on mem, with n variadic tasks.
- *  size must be >= cc_runner_size(n). Return NULL on failure. */
+ *  size must be >= cc_runner_size(n). Input task pointers must be distinct.
+ *  Return NULL on failure. */
 cc_task_t *cc_runner_init_n(void *mem, cc_size size, int n, ...);
 
 /** Array form of cc_runner_init_n(). Return NULL on failure. */
@@ -26,7 +27,8 @@ cc_task_t *cc_runner_init_a(void *mem, cc_size size, int n, cc_task_t *const tas
 
 #if CC_CFG_USE_MALLOC
 
-/** Return a runner with n variadic tasks, or NULL on failure. */
+/** Return a runner with n variadic tasks, or NULL on failure.
+ *  Input task pointers must be distinct. */
 cc_task_t *cc_runner_new_n(int n, ...);
 
 /** Array form of cc_runner_new_n(). Return NULL on failure. */

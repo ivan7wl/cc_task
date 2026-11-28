@@ -76,14 +76,9 @@ void *ext; // extension context; layout unchanged
 - Blocks invoke 不依赖该槽位的值；
 - 普通未扩展任务保持 `ext == NULL`。
 
-runner 挂接任务时：
+runner 挂接任务后，READY/WAIT 状态通过 `task->ext = node` 建立反向关联；RUNNING 时暂时恢复 `task->ext = NULL`。只有 WAIT 状态额外安装 `task->fn = resume_hook`，READY/RUNNING 始终保留原 fn。
 
-```c
-task->fn  = resume_hook;
-task->ext = node;
-```
-
-`ext` 作为通用扩展槽使用；首版只有 runner 扩展。已被其他扩展占用或已经属于 runner 的任务不得重复挂接。
+`ext` 作为通用扩展槽使用；首版只有 runner 扩展。已被其他扩展占用或已经属于 runner 的任务不得重复挂接。因此 add 可用 `ext` 排除 READY/WAIT 重复，用 `cc_task_current()` 排除 RUNNING 重复，无需遍历 READY 链。
 
 ### 3.2 node
 
@@ -197,10 +192,10 @@ cc_task_t *runner = cc_runner_init_n(mem, size, 3, a, b, c);
 
 每个组内任务必须满足：
 
-- 非 NULL，且组内没有重复指针；
+- 非 NULL；同一创建调用中的 task 指针不得重复，由调用方保证；
 - 是库支持的无栈或有栈 live task，且未结束；
 - `next == NULL`，防止 end 时绕过 runner 恢复其他任务；
-- `ext == NULL`，没有挂接其他扩展；
+- `ext == NULL`，没有挂接其他扩展或 runner；
 - 除 self-inclusive 模式下的当前任务外，其他任务没有正在运行；
 - 首版支持 yield/wait/end，以及 await/trans 的 current-chain continuation 迁移。
 
@@ -209,7 +204,7 @@ cc_task_t *runner = cc_runner_init_n(mem, size, 3, a, b, c);
 创建必须遵循“先校验，再统一提交”：
 
 1. 计算并检查总大小，准备 runner + ctx + node 数组的统一存储块；
-2. 用 node 数组暂存并校验全部 task，包括重复指针检查；
+2. 用 node 数组暂存并校验全部 task；同次调用的重复指针由调用方避免，不做 O(n²) 检查；
 3. 任一校验或分配失败，返回 NULL，不修改任何输入 task；
 4. 全部成功后，一次性初始化 runner、resume_hook、ext、READY 链和 alive。
 
@@ -223,15 +218,15 @@ cc_bool cc_runner_add(cc_task_t *runner, cc_task_t *task);
 
 `add` 在 `CC_CFG_USE_MALLOC=1` 时提供。这里区分两种操作：
 
-- **Runner attach**：分配/复用 node，把任务纳入 READY 和 alive；new/add 必须执行。
-- **resume_hook**：安装 task.fn = resume_hook、task.ext = node；只有 call 返回 wait、任务离开 READY 并等待外部唤醒时才执行。
+- **Runner attach**：分配/复用 node，设置 task.ext = node，把任务纳入 READY 和 alive；new/add 必须执行。
+- **resume_hook**：安装 task.fn = resume_hook；只有 call 返回 wait、任务离开 READY 并等待外部唤醒时才执行，task.ext 保持指向 node。
 
 因此 add 必须完成 Runner attach，但不安装 resume_hook。具体步骤：
 
 1. 校验 runner 仍活跃、task 合法且尚未挂接；
 2. 若 FREE 非空，直接取一个内联 node；否则 malloc 一个动态 node 并设置 `cc_rnf_dynamic`；
-3. 设置 node.task = task、node.runner = runner，task.fn/ext 保持原样；
-4. 将 node 加入 READY 尾部，最后 alive++。
+3. 设置 node.task = task、node.runner = runner，task.fn 保持原样；
+4. 将 node 加入 READY 尾部并设置 task.ext = node，最后 alive++。
 
 任一失败不得修改 task/runner。若由组内任务调用 add，当前 runner 会在返回后继续看到新节点；若由外部在 runner WAIT 时调用，调用方随后 resume runner。
 
@@ -339,9 +334,9 @@ pop node
 
 1. 如果 `alive == 0`，结束 runner。
 2. 如果 READY 为空但 `alive > 0`，说明剩余任务都在 WAIT，runner 返回 `cc_tr_wait`。
-3. 从 READY 头部 pop 一个 node。
-4. 直接调用 `cc_task_call(node->task, node->task, node->task->ctx)`；此时 READY 任务保持原 fn/ext。
-5. 返回 yield 时 requeue 最新 current；返回 wait 时才安装 resume_hook 并从 READY 移除；返回 end/current=NULL 时 alive-- 并 retire node。
+3. 从 READY 头部 pop 一个 node，校验 `task.ext == node`，再将 task.ext 暂时清为 NULL。
+4. 直接调用 `cc_task_call(node->task, node->task, node->task->ctx)`；READY/RUNNING 始终使用原 fn。
+5. 返回 yield 时 requeue 最新 current 并恢复 current.ext = node；返回 wait 时安装 resume_hook、保持 current.ext = node；返回 end/current=NULL 时 alive-- 并 retire node。
 6. 返回后 runner 不得再访问已经 retire 的 node。
 7. 若 alive 变为 0，runner end；否则：
    - READY 非空：返回 `cc_tr_yield`；
@@ -353,7 +348,7 @@ runner 调用返回前必须把当前任务槽恢复为 runner；组内任务 en
 
 ## 8. resume_hook：WAIT 外部唤醒入口
 
-READY/RUNNING 阶段不修改 task.fn/ext，runner 直接调用原任务。只有任务返回 wait、需要离开 READY 并等待外部唤醒时，才安装：
+READY 阶段设置 task.ext = node，RUNNING 前暂时清空，两个状态都不修改 task.fn。只有任务返回 wait、需要离开 READY 并等待外部唤醒时，才安装 resume_hook 并恢复 ext = node：
 
 ```c
 node->original_fn = (cc_tconv_func)current->fn;

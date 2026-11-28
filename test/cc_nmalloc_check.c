@@ -187,6 +187,7 @@ static void test_runner_init(void)
     cc_task_t *runner = cc_runner_init_n(storage, size, 2, a, b);
     CHECK(runner == (cc_task_t *)storage);
     CHECK(a != CC_NULL && b != CC_NULL && runner != CC_NULL);
+    CHECK(a->ext != CC_NULL && b->ext != CC_NULL);
 
     cc_task_t *cur = runner;
     CHECK(cc_task_resume(&cur) == cc_tr_yield);
@@ -195,6 +196,7 @@ static void test_runner_init(void)
     CHECK(cc_task_resume(&cur) == cc_tr_end && cur == CC_NULL);
     CHECK(CC_CTX(a, nm_ctx)->value == 2 && CC_CTX(b, nm_ctx)->value == 12);
     CHECK(cc_task_ended(a) == CC_TRUE && cc_task_ended(b) == CC_TRUE);
+    CHECK(a->ext == CC_NULL && b->ext == CC_NULL);
     CHECK(cc_task_ended(runner) == CC_TRUE && runner->ext == CC_NULL);
 }
 #endif // CC_CFG_TASK_CONV

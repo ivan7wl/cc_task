@@ -45,7 +45,8 @@
 #endif
 #define CC_INLINE                   static inline
 #define CC_NULLABLE                 /* marks a pointer parameter that may be NULL */
-#define CC_INOUT                    /* marks a pointer parameter the callee writes too */
+#define CC_OUT                      /* marks a output pointer parameter */
+#define CC_INOUT                    /* marks a input/output pointer parameter */
 #define CC_NULL                     ((void *)0)
 #define CC_LIKELY(x)                __builtin_expect(!!(x), 1)
 #define CC_UNLIKELY(x)              __builtin_expect(!!(x), 0)

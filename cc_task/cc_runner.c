@@ -8,6 +8,7 @@
 
 typedef enum _cc_rnf_e
 {
+    cc_rnf_none    = 0,
     cc_rnf_dynamic = CC_BIT(0),
 } cc_rnf_e;
 
@@ -73,8 +74,18 @@ static cc_runner_ctx_t *_cc_runner_ctx(cc_task_t *runner)
 
 static void _cc_ready_push(cc_task_t *runner, cc_run_node_t *node)
 {
-    node->state = cc_run_ready;
+    node->task->ext = node;
+    node->state     = cc_run_ready;
     cc_list_add_tail(&_cc_runner_ctx(runner)->ready, node, link);
+}
+
+static void _cc_runner_attach(cc_task_t *runner, cc_run_node_t *node, cc_task_t *task, cc_rnf_e flags)
+{
+    node->task        = task;
+    node->original_fn = CC_NULL;
+    node->runner      = runner;
+    node->flags       = flags;
+    _cc_ready_push(runner, node);
 }
 
 static cc_run_node_t *_cc_list_pop(cc_run_list_t *head)
@@ -97,33 +108,26 @@ static cc_runner_ctx_t *_cc_runner_pre_init(void *mem, cc_size size, int n)
     return CC_CTX((cc_task_t *)mem, cc_runner_ctx_t);
 }
 
+static cc_bool _cc_runner_valid_task(cc_task_t *task, cc_task_t *owner)
+{
+    return task->fn != CC_NULL && task->ext == CC_NULL && !cc_task_ended(task) &&
+           (task->next == CC_NULL || task == owner);
+}
+
 static cc_bool _cc_runner_validate_tasks(cc_runner_ctx_t *ctx, int n, cc_task_t *owner,
-                                         CC_INOUT cc_task_t **self)
+                                         CC_OUT cc_task_t **self)
 {
     for (int i = 0; i < n; ++i)
     {
         cc_task_t *task = ctx->nodes[i].task;
-        if (CC_UNLIKELY(task->fn == CC_NULL || task->ext != CC_NULL || cc_task_ended(task)
-            || (task->next != CC_NULL && task != owner)))
+        if (CC_UNLIKELY(!_cc_runner_valid_task(task, owner)))
         {
             return CC_FALSE;
         }
 
         if (task == owner) // owner task add self to runner
         {
-            if (CC_UNLIKELY(*self != CC_NULL))
-            {
-                return CC_FALSE;
-            }
             *self = owner;
-        }
-
-        for (int j = 0; j < i; ++j)
-        {
-            if (CC_UNLIKELY(ctx->nodes[j].task == task))
-            {
-                return CC_FALSE;
-            }
         }
     }
     return CC_TRUE;
@@ -156,10 +160,7 @@ static cc_task_t *_cc_runner_post_init(void *mem, int n, cc_u32 flags)
     for (int i = 0; i < n; ++i)
     {
         cc_run_node_t *node = &ctx->nodes[i];
-        node->original_fn   = CC_NULL;
-        node->runner        = runner;
-        node->flags         = 0;
-        _cc_ready_push(runner, node);
+        _cc_runner_attach(runner, node, node->task, cc_rnf_none);
     }
 
     if (self != CC_NULL)
@@ -272,51 +273,33 @@ cc_task_t *cc_runner_new_a(int n, cc_task_t *const tasks[])
 
 cc_bool cc_runner_add(cc_task_t *runner, cc_task_t *task)
 {
-    if (!(runner->flags & cc_tf_runner) || runner == task ||
-        cc_task_ended(runner) || task->ext != CC_NULL || task->next != CC_NULL ||
-        task == cc_task_current() || cc_task_ended(task))
+    // add do not support add owner self to runner
+    if (CC_UNLIKELY(!(runner->flags & cc_tf_runner) || runner == task || cc_task_ended(runner) ||
+        !_cc_runner_valid_task(task, CC_NULL) || task == cc_task_current()))
     {
         return CC_FALSE;
     }
 
     cc_runner_ctx_t *ctx = _cc_runner_ctx(runner);
-    if (ctx->alive == 0 || ctx->alive == (cc_u32)-1)
+    if (CC_UNLIKELY(ctx->alive == 0 || ctx->alive == (cc_u32)-1)) // runner ending
     {
         return CC_FALSE;
     }
 
-    // READY tasks are deliberately unhooked, so ext alone cannot prove that a
-    // task is not already queued. WAIT/RUNNING duplicates are caught above.
-    cc_run_node_t *it;
-    cc_list_foreach(&ctx->ready, it, link)
-    {
-        if (it->task == task)
-        {
-            return CC_FALSE;
-        }
-    }
-
     cc_run_node_t *node;
-    cc_u8 flags = 0;
-    if (!cc_list_is_empty(&ctx->free, link))
-    {
-        node = _cc_list_pop(&ctx->free);
-    }
-    else
+    cc_rnf_e flags = cc_rnf_none;
+    if (cc_list_is_empty(&ctx->free, link))
     {
         node = (cc_run_node_t *)CC_PORT_MALLOC(sizeof(*node));
-        if (node == CC_NULL)
+        if (CC_UNLIKELY(node == CC_NULL))
         {
             return CC_FALSE;
         }
         flags = cc_rnf_dynamic;
     }
+    else node = _cc_list_pop(&ctx->free);
 
-    node->task = task;
-    node->original_fn = CC_NULL;
-    node->runner = runner;
-    node->flags = flags;
-    _cc_ready_push(runner, node);
+    _cc_runner_attach(runner, node, task, flags);
     ctx->alive++;
     return CC_TRUE;
 }
@@ -448,10 +431,11 @@ static cc_tr_e _cc_runner_body(cc_task_t *runner, void *_, void *ctx_mem)
 
     cc_run_node_t *node = _cc_list_pop(&ctx->ready);
     cc_task_t *task = node->task;
-    if (CC_UNLIKELY(task->ext != CC_NULL))
+    if (CC_UNLIKELY(task->ext != node))
     {
         _cc_runner_bug("cc_runner: invalid ready node");
     }
+    task->ext = CC_NULL;
     node->state = cc_run_running;
     cc_tr_e ret = cc_task_call(task, task, task->ctx);
     return _cc_runner_result(runner, node, ret);
